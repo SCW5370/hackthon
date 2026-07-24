@@ -1,0 +1,149 @@
+import time
+import unittest
+
+from guard.executor import FakeExecutor, JoyExecutor
+from guard.guard_http import SafeExecGuard
+from lab_agent.contracts import ActionPlan, build_action_intent
+from runtime.contracts import Fact, MissionSpec
+from runtime.lease_authority import LeaseAuthority
+from runtime.runtime_http import SafeExecRuntime
+
+
+class InProcessRuntime(SafeExecRuntime):
+    def __init__(self, mission, private_key, guard):
+        super().__init__(mission, private_key)
+        self.guard = guard
+
+    def _call_guard(self, intent, lease):
+        return self.guard.execute(intent.to_dict(), lease.to_dict())
+
+
+def mission() -> MissionSpec:
+    now_ms = int(time.time() * 1000)
+    return MissionSpec.from_dict(
+        {
+            "schema_version": "safeexec.mission.v1",
+            "mission_id": "mission-e2e-test",
+            "principal_id": "lab-agent-01",
+            "valid_from_ms": now_ms - 60_000,
+            "valid_until_ms": now_ms + 60_000,
+            "grants": [
+                {
+                    "grant_id": "sample-a-to-analyzer",
+                    "action": "lab.sample.transfer",
+                    "resource": {"type": "lab.sample", "id": "sample-A"},
+                    "arguments": {
+                        "source": "cold-storage",
+                        "destination": "analyzer-01",
+                    },
+                    "required_facts": [
+                        {
+                            "key": "camera.healthy",
+                            "equals": True,
+                            "max_age_ms": 1500,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+class FakeJoyBackend:
+    def __init__(self, state="succeeded"):
+        self.state = state
+        self.calls = []
+
+    def execute(self, intent):
+        self.calls.append(intent)
+        return {
+            "schema_version": "safeexec.execution.v1",
+            "state": self.state,
+            "finished_at_ms": int(time.time() * 1000),
+            "error_code": None if self.state == "succeeded" else "JOY_UNAVAILABLE",
+            "error": None if self.state == "succeeded" else "offline",
+        }
+
+
+class SafeExecEndToEndTests(unittest.TestCase):
+    def test_agent_runtime_guard_contract_allows_only_granted_action(self):
+        private_key, public_key = LeaseAuthority.generate_keypair()
+        executor = FakeExecutor()
+        guard = SafeExecGuard(public_key, executor)
+        runtime = InProcessRuntime(mission(), private_key, guard)
+        runtime.add_fact(
+            Fact(
+                key="camera.healthy",
+                value=True,
+                source="rdk-camera",
+                confidence=1.0,
+                timestamp=time.time(),
+                ttl_ms=1500,
+            ).to_dict()
+        )
+
+        normal = build_action_intent(
+            ActionPlan("sample-A", "cold-storage", "analyzer-01")
+        )
+        allowed = runtime.process_action(normal)
+        self.assertEqual(allowed["status"], "ok")
+        self.assertEqual(allowed["guard_response"]["status"], "executed")
+        self.assertEqual(executor.call_count, 1)
+
+        malicious = build_action_intent(
+            ActionPlan("sample-A", "cold-storage", "waste-bin")
+        )
+        denied = runtime.process_action(malicious)
+        self.assertEqual(denied["status"], "denied")
+        self.assertEqual(
+            denied["decision"]["reason_code"], "NO_MATCHING_GRANT"
+        )
+        self.assertEqual(executor.call_count, 1)
+
+    def test_security_guard_uses_live_joy_adapter_backend(self):
+        backend = FakeJoyBackend()
+        executor = JoyExecutor(backend=backend)
+        intent = build_action_intent(
+            ActionPlan("sample-A", "cold-storage", "analyzer-01")
+        )
+        receipt = executor.execute(intent)
+        self.assertEqual(receipt["status"], "executed")
+        self.assertEqual(len(backend.calls), 1)
+
+    def test_fact_publisher_cannot_override_policy_max_age(self):
+        private_key, public_key = LeaseAuthority.generate_keypair()
+        executor = FakeExecutor()
+        runtime = InProcessRuntime(
+            mission(),
+            private_key,
+            SafeExecGuard(public_key, executor),
+        )
+        runtime.add_fact(
+            Fact(
+                key="camera.healthy",
+                value=True,
+                source="untrusted-adapter",
+                confidence=1.0,
+                timestamp=time.time() - 2,
+                ttl_ms=60_000,
+            ).to_dict()
+        )
+        intent = build_action_intent(
+            ActionPlan("sample-A", "cold-storage", "analyzer-01")
+        )
+        denied = runtime.process_action(intent)
+        self.assertEqual(denied["status"], "denied")
+        self.assertEqual(denied["decision"]["reason_code"], "FACT_STALE")
+        self.assertEqual(executor.call_count, 0)
+
+    def test_live_joy_failure_is_not_reported_as_executed(self):
+        executor = JoyExecutor(backend=FakeJoyBackend(state="failed"))
+        intent = build_action_intent(
+            ActionPlan("sample-A", "cold-storage", "analyzer-01")
+        )
+        with self.assertRaises(RuntimeError):
+            executor.execute(intent)
+
+
+if __name__ == "__main__":
+    unittest.main()
