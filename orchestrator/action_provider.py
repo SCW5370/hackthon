@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import ssl
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import certifi
 
 from biolab.catalog import SAMPLE_IDS
 from lab_agent.contracts import ActionPlan
@@ -76,6 +79,7 @@ class OpenAIActionProvider:
         if not self.base_url or not self.api_key or not self.model:
             raise ValueError("base_url, api_key, and model are required")
         self.endpoint = f"{self.base_url.rstrip('/')}/chat/completions"
+        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     def plan(
         self,
@@ -128,7 +132,11 @@ class OpenAIActionProvider:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(
+                request,
+                timeout=self.timeout,
+                context=self.ssl_context,
+            ) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")

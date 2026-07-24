@@ -94,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(HTTPStatus.NOT_FOUND, "not found")
         except OrchestratorError as exc:
             self._error(exc.status, str(exc))
+        except (ConnectionError, RuntimeError) as exc:
+            self._error(HTTPStatus.BAD_GATEWAY, str(exc))
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
 

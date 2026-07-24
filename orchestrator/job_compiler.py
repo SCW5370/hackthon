@@ -9,9 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
+import ssl
 from typing import Any, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import certifi
 
 from biolab.catalog import SAMPLE_IDS
 
@@ -242,6 +245,7 @@ class OpenAIJobCompiler:
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     def compile(
         self,
@@ -289,7 +293,11 @@ class OpenAIJobCompiler:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(
+                request,
+                timeout=self.timeout,
+                context=self.ssl_context,
+            ) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
