@@ -91,13 +91,22 @@ python tests/test_guard.py
 
 - `POST /v1/actions` - Agent 提交动作
 - `POST /v1/facts` - 适配器更新 Fact
+- `GET /v1/state` - 当前 Fact 与最近一次动作摘要
 - `GET /v1/events` - 审计事件流
 - `GET /healthz` - 健康检查
 
 ### Guard
 
 - `POST /v1/execute` - 验证 Lease 后执行
+- `GET /v1/events` - Guard 审计事件
+- `GET /v1/physical` - JOY 当前物理状态
 - `GET /healthz` - 健康检查
+
+### Dashboard
+
+- `GET /api/dashboard/v1` - 聚合 Runtime、Guard 与 JOY 的只读展示数据
+- `POST /api/dashboard/scenario` - 启动受保护演示；无保护基线默认禁用
+- 默认端口：Dashboard `8787`、Runtime `8790`、Guard `8788`
 
 ## 测试
 

@@ -37,6 +37,10 @@ class BaseExecutor(ABC):
         """停止 Executor"""
         pass
 
+    def physical_state(self) -> dict[str, Any] | None:
+        """Return live physical state when the executor has a real backend."""
+        return None
+
 
 class FakeExecutor(BaseExecutor):
     """
@@ -141,6 +145,12 @@ class JoyExecutor(BaseExecutor):
             "executed_at_ms": receipt["finished_at_ms"],
             "receipt": receipt,
         }
+
+    def physical_state(self) -> dict[str, Any] | None:
+        driver = getattr(self._backend, "driver", None)
+        if driver is None:
+            return None
+        return driver.health()
 
     def stop(self):
         driver = getattr(self._backend, "driver", None)

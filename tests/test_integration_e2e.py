@@ -99,6 +99,10 @@ class SafeExecEndToEndTests(unittest.TestCase):
             denied["decision"]["reason_code"], "NO_MATCHING_GRANT"
         )
         self.assertEqual(executor.call_count, 1)
+        latest = runtime.get_state()["latest_action"]
+        self.assertEqual(latest["intent"]["request_id"], malicious["request_id"])
+        self.assertEqual(latest["decision"]["effect"], "deny")
+        self.assertIsNone(latest["lease"])
 
     def test_security_guard_uses_live_joy_adapter_backend(self):
         backend = FakeJoyBackend()

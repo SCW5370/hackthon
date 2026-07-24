@@ -12,3 +12,7 @@ venv/
 keys/private_key.txt
 .env
 .DS_Store
+.playwright-mcp/
+logs/
+demo_*.png
+demo_*.jpg

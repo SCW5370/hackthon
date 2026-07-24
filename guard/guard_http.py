@@ -2,6 +2,8 @@
 SafeExec V1 Guard HTTP Server
 提供 REST API:
 - POST /v1/execute - 验证 Lease 后执行
+- GET /v1/events - Guard 审计事件
+- GET /v1/physical - JOY 实时物理状态
 - GET /healthz - 健康检查
 """
 from __future__ import annotations
@@ -125,6 +127,20 @@ class SafeExecGuard:
     def get_stats(self) -> dict:
         return self.verifier.get_stats()
 
+    def get_physical_state(self) -> dict:
+        try:
+            physical = self.executor.physical_state()
+        except Exception as exc:
+            return {
+                "status": "unavailable",
+                "physical": None,
+                "error": str(exc),
+            }
+        return {
+            "status": "ok" if physical is not None else "unavailable",
+            "physical": physical,
+        }
+
     @staticmethod
     def _get_time() -> float:
         import time
@@ -150,6 +166,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/v1/stats":
             self._json(_guard.get_stats())
+            return
+
+        if parsed.path == "/v1/events":
+            self._json({"events": _guard.get_events()})
+            return
+
+        if parsed.path == "/v1/physical":
+            self._json(_guard.get_physical_state())
             return
 
         self._error(HTTPStatus.NOT_FOUND, "Not found")

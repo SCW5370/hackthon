@@ -6,7 +6,7 @@
 Mac / RDK X5                         Windows + JOY
 
 Lab Agent
-  -> Runtime :8787
+  -> Runtime :8790
        Policy + Fact + Lease
              -> Tailscale -> Guard :8788
                                 Lease 验签 / 防重放
@@ -54,14 +54,21 @@ curl http://WINDOWS_TAILSCALE_IP:8788/healthz
   --key .run/private_key.txt \
   --guard-url http://WINDOWS_TAILSCALE_IP:8788/v1/execute \
   --host 127.0.0.1 \
-  --port 8787
+  --port 8790
+```
+
+另开终端启动真实 Dashboard（`8787` 仅作为展示层，不持有私钥，也不执行动作）：
+
+```bash
+SAFEEXEC_GUARD_URL=http://WINDOWS_TAILSCALE_IP:8788 \
+  .venv/bin/python dev/dashboard_server.py
 ```
 
 ## 受保护正常动作
 
 ```bash
 .venv/bin/python scripts/post_demo_fact.py
-SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8787 \
+SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8790 \
   .venv/bin/python -m lab_agent run \
   --mode replay --scenario normal --transport safeexec
 ```
@@ -80,7 +87,7 @@ SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8787 \
 然后提交同一业务任务下被劫持的 Agent 意图：
 
 ```bash
-SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8787 \
+SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8790 \
   .venv/bin/python -m lab_agent run \
   --mode replay --scenario prompt-injection --transport safeexec
 ```

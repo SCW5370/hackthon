@@ -1,104 +1,242 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SafeExec Node</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <header class="global-header">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SafeExec V1 — Robot Action Firewall Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ HEADER -->
+<header class="v1-header">
+  <div class="brand">
+    <span class="brand-icon">☢</span>
+    <div>
+      <p class="eyebrow">ROBOT ACTION FIREWALL · V1</p>
+      <h1>SafeExec <span id="scenario-name">—</span></h1>
+    </div>
+  </div>
+  <div class="header-center">
+    <div id="result-banner" class="result-banner">
+      <span class="result-icon" id="result-icon">—</span>
       <div>
-        <p class="eyebrow">ROBOT ACTION FIREWALL</p>
-        <h1>SAFEEXEC NODE</h1>
+        <strong id="result-title">等待Agent请求</strong>
+        <p id="result-detail">—</p>
       </div>
-      <div class="header-stat">
-        <span>STATE</span>
-        <strong id="state-value">CONNECTING</strong>
-      </div>
-      <div class="header-stat">
-        <span>ACTION LEASE</span>
-        <strong id="lease-value">—</strong>
-      </div>
-      <div class="header-stat">
-        <span>EXECUTOR</span>
-        <strong id="machine-value">—</strong>
-      </div>
-    </header>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="mode-badge" id="mode-badge">PROTECTED</div>
+    <div class="run-id" id="run-id">—</div>
+  </div>
+</header>
 
-    <main>
-      <section class="panel vision-panel">
-        <div class="panel-title">
-          <div><span>01</span><h2>LIVE VISION</h2></div>
-          <b id="camera-badge">NO SIGNAL</b>
-        </div>
-        <div class="camera-stage">
-          <img id="live-frame" class="camera-frame" alt="RDK X5 live camera" />
-          <div class="camera-grid"></div>
-          <div class="danger-zone">HAZARD ZONE</div>
-          <div class="person-box" id="person-box"><span>PERSON-07</span></div>
-          <p id="vision-message">等待X5视频适配器</p>
-        </div>
-      </section>
+<!-- ═══════════════════════════════════════════════════════════════ MAIN -->
+<main class="v1-dashboard">
 
-      <section class="panel action-panel">
-        <div class="panel-title">
-          <div><span>02</span><h2>DIGITAL EXECUTOR</h2></div>
+  <!-- ── ROW 1: Input Evidence + Agent Intent + Execution Chain ──────── -->
+  <section class="v1-row1">
+
+    <!-- P1: Input Evidence -->
+    <div class="v1-card" id="card-input">
+      <div class="card-header">
+        <span class="card-tag p1">P1</span>
+        <h2>输入证据</h2>
+      </div>
+      <div class="card-body">
+        <div class="field-group">
+          <label>操作员任务</label>
+          <div class="field-value highlight" id="input-task">—</div>
         </div>
-        <div class="machine-stage" id="machine-stage">
-          <div class="machine-core">
-            <i></i><i></i><i></i><i></i>
+        <div class="field-group">
+          <label>不可信内容</label>
+          <div class="field-value danger" id="input-untrusted">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P2: Agent Intent -->
+    <div class="v1-card" id="card-agent">
+      <div class="card-header">
+        <span class="card-tag p2">P2</span>
+        <h2>Agent 实际意图</h2>
+        <span class="badge-compromised" id="badge-compromised">COMPROMISED</span>
+      </div>
+      <div class="card-body">
+        <div class="intent-flow">
+          <div class="intent-chip">
+            <span class="intent-label">样本</span>
+            <span class="intent-value" id="agent-sample">—</span>
           </div>
-          <p id="machine-label">STOPPED</p>
+          <span class="intent-arrow">→</span>
+          <div class="intent-chip">
+            <span class="intent-label">起点</span>
+            <span class="intent-value" id="agent-source">—</span>
+          </div>
+          <span class="intent-arrow">→</span>
+          <div class="intent-chip danger" id="agent-dest-chip">
+            <span class="intent-label">终点</span>
+            <span class="intent-value" id="agent-dest">—</span>
+          </div>
         </div>
-        <div class="lease-track"><i id="lease-track"></i></div>
-      </section>
+        <div class="fingerprint">
+          <span class="fp-label">语义指纹</span>
+          <code id="agent-fingerprint">—</code>
+        </div>
+      </div>
+    </div>
 
-      <section class="panel facts-panel">
-        <div class="panel-title">
-          <div><span>03</span><h2>SAFETY FACTS</h2></div>
+    <!-- P3: Execution Chain -->
+    <div class="v1-card full-width" id="card-chain">
+      <div class="card-header">
+        <span class="card-tag p3">P3</span>
+        <h2>执行链路</h2>
+      </div>
+      <div class="card-body">
+        <div class="exec-chain" id="exec-chain">
+          <!-- Agent -->
+          <div class="chain-node" id="chain-agent" data-node="agent">
+            <div class="chain-icon">🤖</div>
+            <div class="chain-name">Agent</div>
+            <div class="chain-status" id="chain-agent-status">—</div>
+          </div>
+          <div class="chain-connector"><span>›</span></div>
+          <!-- Runtime -->
+          <div class="chain-node" id="chain-runtime" data-node="runtime">
+            <div class="chain-icon">⚙️</div>
+            <div class="chain-name">Runtime</div>
+            <div class="chain-status" id="chain-runtime-status">—</div>
+            <div class="chain-sub" id="chain-runtime-sub">—</div>
+          </div>
+          <div class="chain-connector"><span>›</span></div>
+          <!-- Lease -->
+          <div class="chain-node" id="chain-lease" data-node="lease">
+            <div class="chain-icon">🔐</div>
+            <div class="chain-name">Lease</div>
+            <div class="chain-status" id="chain-lease-status">—</div>
+            <div class="chain-sub" id="chain-lease-sub">—</div>
+          </div>
+          <div class="chain-connector"><span>›</span></div>
+          <!-- Guard -->
+          <div class="chain-node" id="chain-guard" data-node="guard">
+            <div class="chain-icon">🛡️</div>
+            <div class="chain-name">Guard</div>
+            <div class="chain-status" id="chain-guard-status">—</div>
+            <div class="chain-sub" id="chain-guard-sub">—</div>
+          </div>
+          <div class="chain-connector"><span>›</span></div>
+          <!-- JOY -->
+          <div class="chain-node" id="chain-joy" data-node="joy">
+            <div class="chain-icon">🦾</div>
+            <div class="chain-name">JOY</div>
+            <div class="chain-status" id="chain-joy-status">—</div>
+            <div class="chain-sub" id="chain-joy-sub">—</div>
+          </div>
         </div>
-        <div id="facts-list" class="facts-list"></div>
-      </section>
+      </div>
+    </div>
 
-      <section class="panel chain-panel">
-        <div class="panel-title">
-          <div><span>04</span><h2>DECISION CHAIN</h2></div>
-        </div>
-        <div class="chain">
-          <div>METRIC<small>sensor</small></div><b>→</b>
-          <div>FACT<small>TTL</small></div><b>→</b>
-          <div>POLICY<small>external</small></div><b>→</b>
-          <div>LEASE<small>external</small></div><b>→</b>
-          <div>GATEWAY<small>external</small></div>
-        </div>
-        <p class="boundary-note">
-          V0控制台只展示事件；策略、Lease与Gateway由安全负责人接入。
-        </p>
-      </section>
+  </section>
 
-      <section class="panel events-panel">
-        <div class="panel-title">
-          <div><span>05</span><h2>INCIDENT TIMELINE</h2></div>
-        </div>
-        <ol id="events-list"></ol>
-      </section>
+  <!-- ── ROW 2: Physical State + Audit Timeline ────────────────────────── -->
+  <section class="v1-row2">
 
-      <section class="panel crash-panel">
-        <div class="panel-title">
-          <div><span>06</span><h2>MOCK LAB</h2></div>
-          <b>DEV ONLY</b>
+    <!-- P4: Physical State -->
+    <div class="v1-card" id="card-physical">
+      <div class="card-header">
+        <span class="card-tag p4">P4</span>
+        <h2>物理世界状态</h2>
+        <div class="unsafe-indicator" id="unsafe-indicator">
+          <span class="dot safe" id="unsafe-dot"></span>
+          <span id="unsafe-label">安全</span>
         </div>
-        <p>仅用于前端并行开发，不代表真实安全策略。</p>
-        <div class="button-grid">
-          <button data-scenario="normal">NORMAL</button>
-          <button data-scenario="intrusion">ZONE INTRUSION</button>
-          <button data-scenario="camera">CAMERA LOSS</button>
-          <button data-scenario="degraded">DEGRADED</button>
-          <button data-scenario="reset">RESET MOCK</button>
+      </div>
+      <div class="card-body">
+        <div class="physical-grid">
+          <div class="phys-item">
+            <span class="phys-icon">🦾</span>
+            <span class="phys-label">机械臂</span>
+            <span class="phys-value" id="phys-arm">IDLE</span>
+          </div>
+          <div class="phys-item">
+            <span class="phys-icon">🚧</span>
+            <span class="phys-label">平台</span>
+            <span class="phys-value" id="phys-platform">IDLE</span>
+          </div>
+          <div class="phys-item">
+            <span class="phys-icon">⚓</span>
+            <span class="phys-label">当前位置</span>
+            <span class="phys-value" id="phys-dock">home</span>
+          </div>
         </div>
-      </section>
-    </main>
-    <script src="/dashboard.js"></script>
-  </body>
+        <div class="sample-locations">
+          <h3>样品位置</h3>
+          <div class="sample-row">
+            <span class="sample-id">sample-A</span>
+            <div class="sample-track">
+              <div class="sample-marker" id="sample-a-bar"></div>
+            </div>
+            <span class="sample-loc" id="sample-a-loc">cold-storage</span>
+          </div>
+          <div class="sample-row">
+            <span class="sample-id">sample-B</span>
+            <div class="sample-track">
+              <div class="sample-marker" id="sample-b-bar"></div>
+            </div>
+            <span class="sample-loc" id="sample-b-loc">cold-storage</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P5: Audit Timeline -->
+    <div class="v1-card" id="card-timeline">
+      <div class="card-header">
+        <span class="card-tag p5">P5</span>
+        <h2>审计时间线</h2>
+      </div>
+      <div class="timeline-list" id="timeline-list"></div>
+    </div>
+
+    <!-- A/B Comparison -->
+    <div class="v1-card" id="card-ab">
+      <div class="card-header">
+        <span class="card-tag ab">AB</span>
+        <h2>红蓝对比</h2>
+      </div>
+      <div class="card-body">
+        <div class="ab-row red-baseline">
+          <div class="ab-label">🔴 Baseline（无保护）</div>
+          <div class="ab-result" id="ab-red-result">—</div>
+          <div class="ab-detail" id="ab-red-detail">—</div>
+        </div>
+        <div class="ab-divider">⟺</div>
+        <div class="ab-row blue-safeexec">
+          <div class="ab-label">🔵 SafeExec（受保护）</div>
+          <div class="ab-result" id="ab-blue-result">—</div>
+          <div class="ab-detail" id="ab-blue-detail">—</div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════════ FOOTER -->
+<footer class="v1-footer">
+  <div class="scenario-selector">
+    <span class="selector-label">场景:</span>
+    <button class="scenario-btn" data-scenario="baseline">🔴 无保护攻击</button>
+    <button class="scenario-btn active" data-scenario="prompt-injection">🔵 SafeExec 防护</button>
+    <button class="scenario-btn" data-scenario="legitimate">✅ 正常作业</button>
+  </div>
+  <div class="footer-info">
+    <span>SafeExec Robot Action Firewall · V1 · safeexec.dashboard.v1</span>
+  </div>
+</footer>
+
+<script src="/dashboard.js?v=10"></script>
+</body>
 </html>

@@ -70,7 +70,8 @@ case "${1:-status}" in
     start_process bridge \
       env PYTHONPATH="${SAFEEXEC_ROOT}:${PYTHONPATH:-}" \
       python3 "${SAFEEXEC_ROOT}/adapters/rdk_fact_bridge.py" \
-      --config "${SAFEEXEC_ROOT}/config/demo.json"
+      --config "${SAFEEXEC_ROOT}/config/demo.json" \
+      --fact-url "${SAFEEXEC_FACT_URL:-http://192.168.128.20:8790/v1/facts}"
     ;;
   stop)
     stop_process bridge
