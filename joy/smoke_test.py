@@ -54,6 +54,9 @@ def run(host: str, port: int) -> None:
         missing = sorted(set(REQUIRED_ENTITY_NAMES) - set(spawns))
         if missing:
             raise AssertionError(f"missing required entities: {missing}")
+        unexpected = sorted(set(spawns) - set(REQUIRED_ENTITY_NAMES))
+        if unexpected:
+            raise AssertionError(f"unexpected non-project entities: {unexpected}")
 
         inventory = driver.get_inventory()
         if inventory["rfid_tags"] != RFID_TAGS:

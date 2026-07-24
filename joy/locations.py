@@ -47,9 +47,14 @@ RFID_TAGS: Final[dict[str, str]] = {
 }
 
 REQUIRED_ENTITY_NAMES: Final[tuple[str, ...]] = (
+    "transport-lane-0",
+    "transport-lane-1",
+    "transport-lane-2",
+    "transport-lane-3",
     "safeexec_mobile_base",
     "safeexec_arm",
     "safeexec_exchange",
+    "safeexec_rfid",
     "safeexec_status",
     "sample-A",
     "sample-B",

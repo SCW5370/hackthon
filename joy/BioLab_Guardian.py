@@ -71,22 +71,6 @@ def _spawn_floor(
     )
 
 
-def _spawn_decor(
-    mesh: SpawnableMeshes,
-    location: tuple[float, float, float],
-    *,
-    rotation: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
-) -> None:
-    editor.spawn_static_mesh(
-        mesh,
-        location=location,
-        rotation=rotation,
-        scale=scale,
-        adjust_z=True,
-    )
-
-
 def _build_lanes() -> None:
     lane_segments = (
         ((-7.0, -2.5, 0.025), (0.12, 2.5, 0.025)),
@@ -105,9 +89,6 @@ def _build_stations() -> None:
         Colors.Lightblue,
         (1.0, 1.25, 0.12),
     )
-    _spawn_decor(SpawnableMeshes.Shelf, (-4.7, -5.0, 0.0), rotation=(0, 0, 90))
-    _spawn_decor(SpawnableMeshes.Bottle1, (-5.0, -5.65, 0.0), scale=(1.4, 1.4, 1.4))
-    _spawn_decor(SpawnableMeshes.Bottle2, (-5.0, -4.35, 0.0), scale=(1.4, 1.4, 1.4))
 
     _spawn_floor(
         "analyzer-01",
@@ -115,8 +96,6 @@ def _build_stations() -> None:
         Colors.Silver,
         (1.0, 1.1, 0.12),
     )
-    _spawn_decor(SpawnableMeshes.Table, (0.5, -5.0, 0.0), rotation=(0, 0, 90))
-    _spawn_decor(SpawnableMeshes.Bottle3, (0.0, -5.7, 0.0), scale=(1.5, 1.5, 1.5))
 
     _spawn_floor(
         "quarantine-zone",
@@ -124,8 +103,6 @@ def _build_stations() -> None:
         Colors.Gold,
         (1.1, 1.2, 0.08),
     )
-    _spawn_decor(SpawnableMeshes.SmallFence, (0.9, 4.0, 0.0), rotation=(0, 0, 90))
-    _spawn_decor(SpawnableMeshes.SignRadioactive, (0.4, 4.8, 0.0))
 
     _spawn_floor(
         "waste-bin",
@@ -133,8 +110,6 @@ def _build_stations() -> None:
         Colors.Firebrick,
         (1.1, 1.25, 0.12),
     )
-    _spawn_decor(SpawnableMeshes.Dumpster, (6.65, 4.0, 0.0), rotation=(0, 0, 90))
-    _spawn_decor(SpawnableMeshes.SignDanger, (5.8, 5.0, 0.0))
 
 
 editor.clear_all()

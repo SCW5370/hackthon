@@ -85,6 +85,7 @@ def main() -> dict[str, Any]:
             "exchange.get_data(biolab_inventory)",
             lambda: exchange.get_data("biolab_inventory"),
         ),
+        "all_spawns": _call("editor.get_all_spawns", editor.get_all_spawns),
         "method_inventory": {
             "editor": _methods(
                 editor, ("location", "bound", "transform", "entity", "attach")
