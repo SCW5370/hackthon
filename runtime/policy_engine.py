@@ -83,8 +83,10 @@ class PolicyEngine:
                     reason_code="FACT_MISSING",
                 )
 
-            # Fact 过期
-            if not fact.is_fresh(now_sec):
+            # Fact must satisfy both the publisher TTL and the stricter
+            # policy-owned max age. A publisher cannot extend its own trust.
+            fact_age_ms = (now_sec - fact.timestamp) * 1000
+            if not fact.is_fresh(now_sec) or fact_age_ms > req_fact.max_age_ms:
                 return Decision.deny(
                     request_id=intent.request_id,
                     reason_code="FACT_STALE",

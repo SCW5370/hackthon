@@ -54,6 +54,9 @@ python tests/test_lease.py
 python tests/test_guard.py
 ```
 
+真实 Agent、Windows Guard 与 JOY 的部署和 A/B 演示步骤见
+[`docs/e2e-integration.md`](docs/e2e-integration.md)。
+
 ## 数据契约
 
 ### ActionIntent (Agent → Runtime)

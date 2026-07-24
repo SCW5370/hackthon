@@ -18,7 +18,7 @@ def _build_transport(args: argparse.Namespace) -> Any:
         return DryRunTransport()
     if args.transport == "safeexec":
         return SafeExecTransport(
-            os.environ.get("SAFEEXEC_RUNTIME_URL", "http://127.0.0.1:8790")
+            os.environ.get("SAFEEXEC_RUNTIME_URL", "http://127.0.0.1:8787")
         )
     return LegacyTransport(
         bridge_url=os.environ.get("LAB_LEGACY_URL", "http://127.0.0.1:8791"),

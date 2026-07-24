@@ -4,10 +4,9 @@ SafeExec V1 Executor Interface
 """
 from __future__ import annotations
 
-import json
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from runtime.contracts import ActionIntent
@@ -106,8 +105,21 @@ class JoyExecutor(BaseExecutor):
     destination = ActionIntent.arguments.destination
     """
 
-    def __init__(self, joy_driver_url: str = "http://127.0.0.1:18189"):
-        self._joy_driver_url = joy_driver_url
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 18189,
+        *,
+        timeout: float = 120.0,
+        backend: Any | None = None,
+    ):
+        if backend is None:
+            from joy.driver import JoyDriver
+            from joy.safeexec_adapter import JoyExecutor as JoyBackend
+
+            driver = JoyDriver(host, port).connect()
+            backend = JoyBackend(driver, timeout=timeout)
+        self._backend = backend
         self._call_count = 0
 
     @property
@@ -116,23 +128,21 @@ class JoyExecutor(BaseExecutor):
 
     def execute(self, intent: dict) -> dict:
         self._call_count += 1
-
-        # 映射到 JoyCommand
-        joy_command = {
-            "command_id": intent.get("request_id"),
-            "action": "TRANSFER",
-            "sample_id": intent.get("resource", {}).get("id"),
-            "source": intent.get("arguments", {}).get("source"),
-            "destination": intent.get("arguments", {}).get("destination"),
-        }
-
-        # TODO: 调用真实的 JoyDriver
-        # 目前只是模拟
-        print(f"[JoyExecutor] Sending: {json.dumps(joy_command)}")
-
+        receipt = self._backend.execute(intent)
+        if receipt.get("state") != "succeeded":
+            raise RuntimeError(
+                f"JOY execution failed: "
+                f"{receipt.get('error_code')}: {receipt.get('error')}"
+            )
         return {
             "status": "executed",
-            "command_id": joy_command["command_id"],
-            "message": "Transferred via JoyDriver",
-            "executed_at_ms": int(time.time() * 1000),
+            "command_id": intent.get("request_id"),
+            "message": "Transferred by the live JOY BioLab executor",
+            "executed_at_ms": receipt["finished_at_ms"],
+            "receipt": receipt,
         }
+
+    def stop(self):
+        driver = getattr(self._backend, "driver", None)
+        if driver is not None:
+            driver.disconnect()

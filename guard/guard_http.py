@@ -203,6 +203,9 @@ def main():
     parser.add_argument("--audience", default="joy-guard-01")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8788)
+    parser.add_argument("--joy-host", default="127.0.0.1")
+    parser.add_argument("--joy-port", type=int, default=18189)
+    parser.add_argument("--joy-timeout", type=float, default=120.0)
 
     args = parser.parse_args()
 
@@ -216,7 +219,11 @@ def main():
         print("[Guard] Using FakeExecutor (no real robot)")
     else:
         from .executor import JoyExecutor
-        executor = JoyExecutor()
+        executor = JoyExecutor(
+            host=args.joy_host,
+            port=args.joy_port,
+            timeout=args.joy_timeout,
+        )
         print("[Guard] Using JoyExecutor (real robot)")
 
     global _guard
