@@ -102,25 +102,53 @@ class DashboardBackend:
         )
         physical: dict[str, Any] | None = self._last_physical
         physical_status = "cached" if physical is not None else "unavailable"
+        confirmed = line.get("physical_evidence")
+        if isinstance(confirmed, dict):
+            physical = self._merge_physical(physical, confirmed)
+            self._last_physical = physical
+            physical_status = "confirmed"
         if not busy:
             try:
                 response = json_request(f"{self.guard_url}/v1/physical", timeout=3)
                 value = response.get("physical")
                 if isinstance(value, dict):
-                    physical = value
-                    self._last_physical = value
+                    physical = self._merge_physical(physical, value)
+                    self._last_physical = physical
                     physical_status = "live"
                 else:
                     physical_status = str(response.get("status", "unavailable"))
             except UpstreamError:
-                physical_status = "unavailable"
+                if physical is None:
+                    physical_status = "unavailable"
         return {
-            "schema_version": "safeexec.dashboard.v2",
+            "schema_version": "safeexec.dashboard.v3",
             "line": line,
             "physical": physical,
             "physical_status": physical_status,
             "unsafe_demo_enabled": self.enable_unsafe_demo,
         }
+
+    @staticmethod
+    def _merge_physical(
+        base: dict[str, Any] | None,
+        update: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(base or {})
+        merged.update(
+            {
+                key: value
+                for key, value in update.items()
+                if key != "sample_locations"
+            }
+        )
+        locations: dict[str, Any] = {}
+        if isinstance((base or {}).get("sample_locations"), dict):
+            locations.update((base or {})["sample_locations"])
+        if isinstance(update.get("sample_locations"), dict):
+            locations.update(update["sample_locations"])
+        if locations:
+            merged["sample_locations"] = locations
+        return merged
 
     def control(self, action: str) -> dict[str, Any]:
         if action not in {"start", "pause", "resume", "reset"}:
@@ -138,6 +166,14 @@ class DashboardBackend:
             method="POST",
             payload=value,
             timeout=5,
+        )
+
+    def submit_operator_command(self, value: dict[str, Any]) -> dict[str, Any]:
+        return json_request(
+            f"{self.orchestrator_url}/v1/agent/commands",
+            method="POST",
+            payload=value,
+            timeout=65,
         )
 
     def events(self, after: int) -> dict[str, Any]:
@@ -210,6 +246,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.backend.control(action))
             elif parsed.path == "/api/testing/injections":
                 self._json(self.backend.inject(self._body()), HTTPStatus.ACCEPTED)
+            elif parsed.path == "/api/agent/commands":
+                self._json(
+                    self.backend.submit_operator_command(self._body()),
+                    HTTPStatus.CREATED,
+                )
             elif parsed.path == "/api/advanced/unsafe-baseline":
                 self._require_empty(self._body())
                 self._json(

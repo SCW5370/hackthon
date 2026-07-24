@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,7 @@ from .service import (
     LineOrchestrator,
     OrchestratorError,
 )
+from .job_compiler import DeterministicJobCompiler, OpenAIJobCompiler
 
 
 class OrchestratorServer(ThreadingHTTPServer):
@@ -72,6 +74,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.app.reset())
             elif parsed.path == "/v1/testing/injections":
                 self._json(self.app.register_injection(data), HTTPStatus.ACCEPTED)
+            elif parsed.path == "/v1/agent/commands":
+                self._json(
+                    self.app.compile_operator_command(data),
+                    HTTPStatus.CREATED,
+                )
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
         except OrchestratorError as exc:
@@ -151,11 +158,29 @@ def main() -> None:
     parser.add_argument("--fact-mode", choices=("demo", "external"), default="demo")
     parser.add_argument("--recovery-delay", type=float, default=1.5)
     parser.add_argument("--enable-testing", action="store_true")
+    parser.add_argument(
+        "--agent-provider",
+        choices=("replay", "openai"),
+        default=os.getenv("SAFEEXEC_AGENT_PROVIDER", "replay"),
+    )
+    parser.add_argument("--llm-base-url", default=os.getenv("LLM_BASE_URL", ""))
+    parser.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", ""))
+    parser.add_argument("--llm-model", default=os.getenv("LLM_MODEL", ""))
     args = parser.parse_args()
 
+    job_compiler = (
+        OpenAIJobCompiler(
+            base_url=args.llm_base_url,
+            api_key=args.llm_api_key,
+            model=args.llm_model,
+        )
+        if args.agent_provider == "openai"
+        else DeterministicJobCompiler()
+    )
     server = OrchestratorServer((args.host, args.port), Handler)
     server.orchestrator = LineOrchestrator(
         HttpRuntimeClient(args.runtime_url),
+        job_compiler=job_compiler,
         fact_mode=args.fact_mode,
         recovery_delay=args.recovery_delay,
         testing_enabled=args.enable_testing,

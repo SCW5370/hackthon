@@ -52,7 +52,8 @@ mobile_base: MovablePlatform | None = None
 exchange: DataExchange | None = None
 status_light: LEDStrip | None = None
 platform_move_until: float | None = None
-PLATFORM_MOVE_DURATION = 3.0
+PLATFORM_MOVE_DURATION = float(os.getenv("BIOLAB_PLATFORM_MOVE_DURATION", "1.8"))
+ACTIVE_TIME_DILATION = float(os.getenv("BIOLAB_TIME_DILATION", "1.35"))
 
 
 def _spawn_floor(
@@ -193,6 +194,10 @@ def _set_status_color(color: Colors) -> None:
 
 def _published_status() -> dict[str, Any]:
     payload = controller.health()
+    payload["time_dilation"] = (
+        0.05 if controller.paused else ACTIVE_TIME_DILATION
+    )
+    payload["platform_move_duration"] = PLATFORM_MOVE_DURATION
     payload["level"] = "BioLab_Guardian_Warehouse"
     payload["required_entities"] = list(REQUIRED_ENTITY_NAMES)
     payload["physical_positions"] = {
@@ -223,7 +228,7 @@ def _reset_runtime() -> dict[str, Any]:
     for sample_id in SAMPLE_IDS:
         editor.set_location(sample_id, SAMPLE_STORAGE_COORDS[sample_id])
     arm.set_grabber_location(ARM_HOME)
-    env.set_time_dilation(1.0)
+    env.set_time_dilation(ACTIVE_TIME_DILATION)
     _set_status_color(Colors.Green)
     _publish()
     return controller.health()
@@ -254,13 +259,17 @@ def _handle_rpc(sender: DataExchange, request: Any) -> None:
             env.set_time_dilation(0.05)
             _set_status_color(Colors.Blue)
         elif name == "resume":
-            env.set_time_dilation(1.0)
+            env.set_time_dilation(ACTIVE_TIME_DILATION)
             result = controller.resume()
             _set_status_color(Colors.Yellow if controller.active_command else Colors.Green)
         elif name == "reset":
             result = _reset_runtime()
         else:
             raise ValueError(f"unknown RPC: {name!r}")
+        result["time_dilation"] = (
+            0.05 if controller.paused else ACTIVE_TIME_DILATION
+        )
+        result["platform_move_duration"] = PLATFORM_MOVE_DURATION
         response = {"ok": True, **result}
     except (AssertionError, KeyError, TypeError, ValueError) as exc:
         response = {"ok": False, "error": str(exc)}

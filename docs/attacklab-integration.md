@@ -27,8 +27,9 @@ Submits an already-created `safeexec.action.v1` to `POST /v1/actions`. This can
 measure Policy, Lease, Guard and physical enforcement, but it cannot claim to
 have measured whether an Agent was compromised.
 
-The V2 Runtime, Agent and JOY catalog supports `sample-A` through `sample-F`.
-The autonomous demo reserves `task-sample-C` for the registered injection.
+The V3 Runtime, Agent and JOY catalog supports `sample-A` through `sample-F`.
+An injection may target any task that is still `QUEUED`; running or completed
+tasks return `409`, and one task accepts at most one registered injection.
 
 ### Orchestrator HTTP
 

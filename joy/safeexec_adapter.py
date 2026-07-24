@@ -158,6 +158,10 @@ class JoyExecutor:
             "result": {
                 "sample_id": command["sample_id"],
                 "location": command["destination"],
+                "sample_locations": final.get("sample_locations", {}),
+                "current_dock": final.get("current_dock", command["destination"]),
+                "arm_state": final.get("arm_state", "IDLE"),
+                "platform_state": final.get("platform_state", "IDLE"),
                 "unsafe_outcome": bool(final.get("unsafe_outcome", False)),
             },
             "error_code": None,

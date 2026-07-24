@@ -56,6 +56,38 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(value["physical"]["arm_state"], "MOVING")
         self.assertEqual(mocked.call_count, 1)
 
+    def test_busy_snapshot_merges_confirmed_execution_receipt_inventory(self) -> None:
+        self.backend._last_physical = {
+            "sample_locations": {
+                "sample-A": "analyzer-01",
+                "sample-B": "cold-storage",
+            },
+            "current_dock": "analyzer-01",
+        }
+        line = {
+            "line_state": "RUNNING",
+            "tasks": [{"task_id": "task-sample-C", "status": "EXECUTING"}],
+            "physical_evidence": {
+                "source": "joy-execution-receipt",
+                "sample_locations": {
+                    "sample-A": "analyzer-01",
+                    "sample-B": "analyzer-01",
+                },
+                "current_dock": "analyzer-01",
+            },
+        }
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value=line,
+        ) as mocked:
+            value = self.backend.snapshot()
+        self.assertEqual(value["physical_status"], "confirmed")
+        self.assertEqual(
+            value["physical"]["sample_locations"]["sample-B"],
+            "analyzer-01",
+        )
+        self.assertEqual(mocked.call_count, 1)
+
     def test_unsafe_baseline_is_disabled_by_default(self) -> None:
         with self.assertRaises(UpstreamError) as raised:
             self.backend.run_unsafe_baseline("")

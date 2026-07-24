@@ -53,6 +53,13 @@ grid, assigns unique colors, RFID tags, and destination slots, registers the
 six RPCs, and starts the non-blocking arm state machine. Completed samples do
 not overlap, and no manual scene placement is required.
 
+V3 uses continuous dock-to-dock routing. After a sample is released, the arm
+retracts to its safe pose but the mobile base stays at the destination. The
+next command travels directly from that dock to its source instead of returning
+Home after every item. `BIOLAB_PLATFORM_MOVE_DURATION` and
+`BIOLAB_TIME_DILATION` can tune demo speed; defaults are `1.8` seconds and
+`1.35`.
+
 Stop only the background level runtime with:
 
 ```powershell

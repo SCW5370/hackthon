@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from biolab.catalog import SAMPLE_IDS
 from lab_agent.contracts import ActionPlan, build_action_intent, build_reset_intent
+from .job_compiler import DeterministicJobCompiler
 
 
 LINE_STATES = {
@@ -52,6 +53,13 @@ INJECTION_CHANNELS = {
     "qr",
     "tool_output",
     "operator_message",
+}
+OPERATOR_COMMAND_FIELDS = {
+    "schema_version",
+    "command_id",
+    "text",
+    "requested_by",
+    "submitted_at_ms",
 }
 
 
@@ -149,6 +157,7 @@ class LineOrchestrator:
         runtime: RuntimeClient,
         *,
         provider: ReplayProvider | None = None,
+        job_compiler: Any | None = None,
         fact_mode: str = "demo",
         recovery_delay: float = 1.5,
         testing_enabled: bool = True,
@@ -158,6 +167,7 @@ class LineOrchestrator:
             raise ValueError("fact_mode must be demo or external")
         self.runtime = runtime
         self.provider = provider or ReplayProvider()
+        self.job_compiler = job_compiler or DeterministicJobCompiler()
         self.fact_mode = fact_mode
         self.recovery_delay = recovery_delay
         self.testing_enabled = testing_enabled
@@ -173,10 +183,41 @@ class LineOrchestrator:
         self._tasks: list[dict[str, Any]] = []
         self._injections: dict[str, dict[str, Any]] = {}
         self._injection_by_task: dict[str, str] = {}
+        self._operator_commands: dict[str, dict[str, Any]] = {}
         self._counters: dict[str, int] = {}
+        self._job_manifest: dict[str, Any] = {}
+        self._physical_evidence: dict[str, Any] | None = None
         self._rebuild_line()
 
-    def _rebuild_line(self) -> None:
+    def _rebuild_line(
+        self,
+        sample_ids: tuple[str, ...] = SAMPLE_IDS,
+        *,
+        job_manifest: dict[str, Any] | None = None,
+    ) -> None:
+        if not sample_ids:
+            raise ValueError("a production job must contain at least one sample")
+        self._job_manifest = job_manifest or {
+            "schema_version": "safeexec.job-manifest.v1",
+            "job_id": "job-default-six-samples",
+            "operator_text": "将全部六件样品送往分析区",
+            "requested_by": "system-default",
+            "sample_ids": list(sample_ids),
+            "source": "cold-storage",
+            "destination": "analyzer-01",
+            "selection_strategy": "catalog-order",
+            "provider": "system-default",
+            "tool_call": {
+                "name": "create_transfer_job",
+                "arguments": {
+                    "sample_ids": list(sample_ids),
+                    "source": "cold-storage",
+                    "destination": "analyzer-01",
+                    "selection_strategy": "catalog-order",
+                },
+            },
+            "created_at_ms": int(time.time() * 1000),
+        }
         self._tasks = [
             {
                 "task_id": f"task-{sample_id}",
@@ -193,7 +234,7 @@ class LineOrchestrator:
                 "blocked_decision": None,
                 "error": None,
             }
-            for sample_id in SAMPLE_IDS
+            for sample_id in sample_ids
         ]
         self._current_task_id = None
         self._last_error = None
@@ -232,8 +273,12 @@ class LineOrchestrator:
                     if current
                     else None
                 ),
+                "job_manifest": json.loads(json.dumps(self._job_manifest)),
                 "tasks": json.loads(json.dumps(self._tasks)),
                 "counters": dict(self._counters),
+                "physical_evidence": json.loads(
+                    json.dumps(self._physical_evidence)
+                ),
                 "last_error": json.loads(json.dumps(self._last_error)),
                 "last_seq": self._seq,
                 "fact_mode": self.fact_mode,
@@ -247,6 +292,7 @@ class LineOrchestrator:
             "pause": state == "RUNNING",
             "resume": state == "PAUSED",
             "reset": state in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"},
+            "configure": state == "STOPPED",
             "inject": state in {"STOPPED", "RUNNING", "PAUSE_PENDING", "PAUSED"},
         }
 
@@ -255,7 +301,14 @@ class LineOrchestrator:
             if self._line_state != "STOPPED":
                 raise ConflictError(f"cannot start from {self._line_state}")
             self._line_state = "RUNNING"
-            self._emit("line.started", "orchestrator", {"task_count": len(self._tasks)})
+            self._emit(
+                "line.started",
+                "orchestrator",
+                {
+                    "task_count": len(self._tasks),
+                    "job_id": self._job_manifest["job_id"],
+                },
+            )
             self._ensure_worker()
             return self.snapshot()
 
@@ -293,12 +346,100 @@ class LineOrchestrator:
         with self._lock:
             self._line_state = "STOPPED"
             self._rebuild_line()
+            self._record_physical_from_response(result, fallback_dock="home")
             self._emit(
                 "line.reset",
                 "orchestrator",
                 {"path": "Policy→Lease→Guard→JOY"},
             )
             return self.snapshot()
+
+    def compile_operator_command(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        command = self._validate_operator_command(value)
+        command_id = command["command_id"]
+        with self._lock:
+            existing = self._operator_commands.get(command_id)
+            if existing is not None:
+                if existing["request"] != command:
+                    raise ConflictError(
+                        "command_id already exists with different content"
+                    )
+                return json.loads(json.dumps(existing["response"]))
+            if self._line_state != "STOPPED":
+                raise ConflictError(
+                    "a new trusted job can be compiled only while the line is stopped"
+                )
+
+        compiled = self.job_compiler.compile(
+            command["text"],
+            available_samples=SAMPLE_IDS,
+        )
+        now_ms = int(time.time() * 1000)
+        manifest = {
+            "schema_version": "safeexec.job-manifest.v1",
+            "job_id": str(uuid.uuid4()),
+            "operator_text": command["text"],
+            "requested_by": command["requested_by"],
+            "sample_ids": list(compiled.sample_ids),
+            "source": compiled.source,
+            "destination": compiled.destination,
+            "selection_strategy": compiled.selection_strategy,
+            "provider": compiled.provider,
+            "tool_call": compiled.tool_call,
+            "created_at_ms": now_ms,
+        }
+        with self._lock:
+            if self._line_state != "STOPPED":
+                raise ConflictError("line state changed while compiling the job")
+            self._rebuild_line(compiled.sample_ids, job_manifest=manifest)
+            self._emit(
+                "job.compiled",
+                "agent",
+                {
+                    "job_id": manifest["job_id"],
+                    "command_id": command_id,
+                    "sample_ids": list(compiled.sample_ids),
+                    "selection_strategy": compiled.selection_strategy,
+                    "provider": compiled.provider,
+                },
+            )
+            response = {
+                "status": "compiled",
+                "job_manifest": json.loads(json.dumps(manifest)),
+                "line": self.snapshot(),
+            }
+            self._operator_commands[command_id] = {
+                "request": command,
+                "response": response,
+            }
+            return json.loads(json.dumps(response))
+
+    @staticmethod
+    def _validate_operator_command(value: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, Mapping) or set(value) != OPERATOR_COMMAND_FIELDS:
+            raise ValidationError(
+                "operator command must contain exactly "
+                f"{sorted(OPERATOR_COMMAND_FIELDS)}"
+            )
+        if value.get("schema_version") != "safeexec.operator-command.v1":
+            raise ValidationError("unsupported operator command schema")
+        try:
+            uuid.UUID(str(value.get("command_id")))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("command_id must be a UUID") from exc
+        text = value.get("text")
+        if not isinstance(text, str) or not 1 <= len(text.strip()) <= 1000:
+            raise ValidationError("text must contain 1-1000 characters")
+        requested_by = value.get("requested_by")
+        if (
+            not isinstance(requested_by, str)
+            or not 1 <= len(requested_by.strip()) <= 128
+        ):
+            raise ValidationError("requested_by must contain 1-128 characters")
+        submitted = value.get("submitted_at_ms")
+        if isinstance(submitted, bool) or not isinstance(submitted, int) or submitted < 0:
+            raise ValidationError("submitted_at_ms must be a non-negative integer")
+        return json.loads(json.dumps(dict(value)))
 
     def register_injection(self, value: Mapping[str, Any]) -> dict[str, Any]:
         if not self.testing_enabled:
@@ -314,8 +455,6 @@ class LineOrchestrator:
             task = self._find_task(injection["target_task_id"])
             if task is None:
                 raise ValidationError("unknown target_task_id")
-            if task["sample_id"] != "sample-C":
-                raise ValidationError("V2 demo accepts attacks only for sample-C")
             if task["status"] != "QUEUED":
                 raise ConflictError("target task is no longer queued")
             if task["task_id"] in self._injection_by_task:
@@ -465,7 +604,11 @@ class LineOrchestrator:
                     self._emit(
                         "line.completed",
                         "orchestrator",
-                        {"counters": dict(self._counters)},
+                        {
+                            "job_id": self._job_manifest["job_id"],
+                            "task_count": len(self._tasks),
+                            "counters": dict(self._counters),
+                        },
                     )
                     return
                 self._current_task_id = task["task_id"]
@@ -656,6 +799,10 @@ class LineOrchestrator:
             task["error"] = None
             self._counters["completed_tasks"] += 1
             self._counters["unsafe_outcomes"] += int(unsafe)
+            self._record_physical_from_response(
+                response,
+                fallback_dock=task["destination"],
+            )
             if recovered:
                 self._counters["recovered_tasks"] += 1
                 self._emit(
@@ -689,6 +836,65 @@ class LineOrchestrator:
                     self._last_error,
                     "critical",
                 )
+
+    @staticmethod
+    def _execution_result(response: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        guard = response.get("guard_response")
+        if not isinstance(guard, Mapping):
+            return None
+        execution = guard.get("execution")
+        if not isinstance(execution, Mapping):
+            return None
+        receipt = execution.get("receipt")
+        if not isinstance(receipt, Mapping):
+            return None
+        result = receipt.get("result")
+        return result if isinstance(result, Mapping) else None
+
+    def _record_physical_from_response(
+        self,
+        response: Mapping[str, Any],
+        *,
+        fallback_dock: str,
+    ) -> None:
+        result = self._execution_result(response)
+        if result is None:
+            return
+        existing_locations: dict[str, str] = {}
+        if isinstance(self._physical_evidence, Mapping):
+            previous = self._physical_evidence.get("sample_locations")
+            if isinstance(previous, Mapping):
+                existing_locations = {
+                    str(key): str(location)
+                    for key, location in previous.items()
+                    if key in SAMPLE_IDS
+                }
+        locations = result.get("sample_locations")
+        if isinstance(locations, Mapping):
+            existing_locations.update(
+                {
+                    str(key): str(location)
+                    for key, location in locations.items()
+                    if key in SAMPLE_IDS
+                }
+            )
+        elif result.get("reset") is True:
+            existing_locations = {
+                sample_id: "cold-storage" for sample_id in SAMPLE_IDS
+            }
+        sample_id = result.get("sample_id")
+        location = result.get("location")
+        if sample_id in SAMPLE_IDS and isinstance(location, str):
+            existing_locations[str(sample_id)] = location
+        self._physical_evidence = {
+            "source": "joy-execution-receipt",
+            "confirmed_at_ms": int(time.time() * 1000),
+            "arm_state": str(result.get("arm_state", "IDLE")),
+            "platform_state": str(result.get("platform_state", "IDLE")),
+            "current_dock": str(result.get("current_dock", fallback_dock)),
+            "sample_locations": existing_locations,
+            "unsafe_outcome": bool(result.get("unsafe_outcome", False)),
+        }
 
     @staticmethod
     def _deny_reason(response: Mapping[str, Any]) -> str | None:

@@ -1,4 +1,4 @@
-# SafeExec V2 — Autonomous BioLab Line
+# SafeExec V3 — Agent-driven BioLab Line
 
 > 面向具身 Agent 的零信任执行 Runtime。
 > BioLab Agent 持续提出动作，SafeExec 决定动作是否可在真实设备上执行。
@@ -19,7 +19,7 @@ Dashboard :8787 → Orchestrator :8789 → Runtime :8790
 | **Lease Authority** | Ed25519 签名签发 5 秒 Lease |
 | **Fact Hub** | 存储摄像头等实时状态，支持 TTL 过期 |
 | **Guard** | 验签 + SQLite 防重放 + 执行拦截 |
-| **Orchestrator** | 六任务队列、Agent 会话、攻击注入与单次恢复 |
+| **Orchestrator** | 自然语言工单、动态队列、Agent 会话、攻击注入与单次恢复 |
 | **Dashboard** | 控制常驻生产线并按事件序号增量展示证据 |
 
 ## 安全机制
@@ -49,10 +49,24 @@ open http://127.0.0.1:8787
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-V2 自主生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
+V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 [`docs/e2e-integration.md`](docs/e2e-integration.md)。
 
 ## 数据契约
+
+### JobManifest（Function Calling → Orchestrator）
+
+```json
+{
+  "schema_version": "safeexec.job-manifest.v1",
+  "job_id": "16e25368-0948-4e31-9863-94f6488d31de",
+  "operator_text": "把距离机械臂最近的四个样品运送到分析区",
+  "sample_ids": ["sample-C", "sample-A", "sample-E", "sample-D"],
+  "source": "cold-storage",
+  "destination": "analyzer-01",
+  "selection_strategy": "nearest"
+}
+```
 
 ### ActionIntent (Agent → Runtime)
 
@@ -100,6 +114,7 @@ V2 自主生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 ### Orchestrator
 
 - `GET /v1/line/state`
+- `POST /v1/agent/commands`
 - `POST /v1/control/start|pause|resume|reset`
 - `POST /v1/testing/injections`
 - `GET /v1/events?after=<seq>`
@@ -107,15 +122,16 @@ V2 自主生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 
 ### Dashboard
 
-- `GET /api/dashboard/v2`
+- `GET /api/dashboard/v2`（响应 schema 为 `safeexec.dashboard.v3`）
+- `POST /api/agent/commands`
 - `POST /api/control/start|pause|resume|reset`
 - `POST /api/testing/injections`
 - `GET /api/events/stream?after=<seq>`
 
 ## 测试
 
-验收目标：完成 6、阻断 1、恢复 1、危险动作 0，A～F 全部位于
-`analyzer-01`。
+动态四样品实机基线：完成 4、阻断 1、恢复 1、危险动作 0；攻击可绑定
+任意尚未执行的任务。默认六样品工单仍保留用于兼容 V2 验收。
 
 ## 开发
 

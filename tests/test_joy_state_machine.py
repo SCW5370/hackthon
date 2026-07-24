@@ -48,8 +48,9 @@ class JoyStateMachineTests(unittest.TestCase):
         observed = finish_active(controller)
         self.assertEqual(observed, list(TRANSFER_SEQUENCE))
         self.assertEqual(controller.sample_locations["sample-A"], "analyzer-01")
-        self.assertEqual(controller.current_dock, "home")
+        self.assertEqual(controller.current_dock, "analyzer-01")
         self.assertFalse(controller.unsafe_outcome)
+        self.assertNotIn("DRIVE_HOME", [step.value for step in observed])
 
     def test_drive_steps_emit_platform_actions(self) -> None:
         controller = BioLabController()

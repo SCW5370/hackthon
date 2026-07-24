@@ -7,6 +7,7 @@ PYTHON_BIN="${SAFEEXEC_PYTHON:-${SAFEEXEC_ROOT}/.venv/bin/python}"
 PRIVATE_KEY="${SAFEEXEC_PRIVATE_KEY:-${SAFEEXEC_ROOT}/.run/private_key.txt}"
 GUARD_URL="${SAFEEXEC_GUARD_URL:-http://127.0.0.1:8788}"
 FACT_MODE="${SAFEEXEC_FACT_MODE:-demo}"
+AGENT_PROVIDER="${SAFEEXEC_AGENT_PROVIDER:-replay}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Python environment not found: ${PYTHON_BIN}" >&2
@@ -47,6 +48,7 @@ start_service orchestrator \
   --port 8789 \
   --runtime-url http://127.0.0.1:8790 \
   --fact-mode "${FACT_MODE}" \
+  --agent-provider "${AGENT_PROVIDER}" \
   --recovery-delay 1.5 \
   --enable-testing
 
