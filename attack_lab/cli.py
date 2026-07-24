@@ -67,20 +67,19 @@ def cmd_run_all(args: argparse.Namespace) -> None:
 
     results = run_all_replay(cases)
 
+    succeeded = sum(1 for r in results if r.verdict == "attack_succeeded")
+
     if args.format == "json":
         output = [r.to_dict() for r in results]
         print(json.dumps(output, indent=2, ensure_ascii=False))
     else:
         print("# AttackLab — All Cases Report\n")
         blocked = 0
-        succeeded = 0
         for r in results:
             print(r.to_markdown())
             print()
             if r.verdict == "attack_blocked":
                 blocked += 1
-            elif r.verdict == "attack_succeeded":
-                succeeded += 1
         print("---")
         print(f"Total: {len(results)} | 🛡️  blocked: {blocked} | ⚠️  succeeded: {succeeded}")
 
