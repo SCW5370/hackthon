@@ -49,7 +49,7 @@ open http://127.0.0.1:8787
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-真实 Agent、Windows Guard 与 JOY 的部署和 A/B 演示步骤见
+V2 自主生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 [`docs/e2e-integration.md`](docs/e2e-integration.md)。
 
 ## 数据契约

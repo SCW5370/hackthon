@@ -1,25 +1,44 @@
-# SafeExec × BioLab Agent × JOY 联调
+# SafeExec V2 自主生产线联调
 
-## 最终部署边界
+本方案将 Mac 上的 Dashboard、Orchestrator、Runtime 与 Windows 上的 Guard、JOY OF PROGRAMMING 串成一条常驻执行链。各服务只启动一次，之后由 Dashboard 控制六件样品的自主搬运。
+
+## 架构
 
 ```text
-Mac / RDK X5                         Windows + JOY
-
-Lab Agent
-  -> Runtime :8790
-       Policy + Fact + Lease
-             -> Tailscale -> Guard :8788
-                                Lease 验签 / 防重放
-                                      -> JoyExecutor
-                                           -> JOY :18189
+Dashboard :8787
+    ↓ 控制 / SSE
+Orchestrator :8789
+    ↓ ActionIntent
+Runtime :8790
+    ↓ Signed Action Lease
+Windows Guard :8788
+    ↓ JoyCommand
+JOY RPC :18189
 ```
 
-Runtime 持有 Ed25519 私钥。Windows Guard 只持有公钥，并与真实
-`JoyDriver` 运行在 JOY 的嵌入式 Python 中。
+Runtime 持有 Ed25519 私钥。Windows Guard 只持有公钥，并与真实 `JoyDriver` 运行在执行侧。
 
-## 初始化
+## 1. Windows：预先启动 JOY 与 Guard
 
-Mac：
+打开 JOY OF PROGRAMMING 并进入 BioLab 场景，然后在仓库目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_biolab.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start_windows_guard.ps1
+```
+
+确认 Guard，并通过 JOY 冒烟测试检查 `18189` RPC：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8788/healthz
+py -m joy.smoke_test
+```
+
+演示期间无需再次启动 PowerShell。Dashboard 不会创建 Windows 进程。
+
+## 2. Mac：一次启动完整服务栈
+
+首次运行先初始化 Python 环境和签名密钥：
 
 ```bash
 python3 -m venv .venv
@@ -30,105 +49,98 @@ mkdir -p .run
   --public-key .run/public_key.txt
 ```
 
-将 `.run/public_key.txt` 复制到 Windows 仓库的 `.run/public_key.txt`。
-私钥不得复制到 Windows 或提交到 Git。
+将 `.run/public_key.txt` 复制到 Windows 仓库的同一路径。私钥不得复制到 Windows 或提交到 Git。
 
-Windows 已启动 JOY 和 `BioLab_Guardian.py` 后：
-
-```powershell
-.\scripts\install_windows_guard_deps.ps1
-.\scripts\start_windows_guard_interactive.ps1
-```
-
-验证：
+将 `WINDOWS_IP` 替换为 Windows 的局域网或 Tailscale 地址：
 
 ```bash
-curl http://WINDOWS_TAILSCALE_IP:8788/healthz
+SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
 ```
 
-## 启动 Runtime
+服务地址：
+
+- Dashboard：`http://127.0.0.1:8787`
+- Orchestrator：`http://127.0.0.1:8789`
+- Runtime：`http://127.0.0.1:8790`
+
+健康检查：
 
 ```bash
-.venv/bin/python -m runtime.runtime_http \
-  --mission config/mission.yaml \
-  --key .run/private_key.txt \
-  --guard-url http://WINDOWS_TAILSCALE_IP:8788/v1/execute \
-  --host 127.0.0.1 \
-  --port 8790
+curl http://127.0.0.1:8789/healthz
+curl http://127.0.0.1:8790/healthz
 ```
 
-另开终端启动真实 Dashboard（`8787` 仅作为展示层，不持有私钥，也不执行动作）：
+## 3. V2 演示流程
+
+在 Dashboard 中依次操作：
+
+1. 点击“复位”。该动作会先由 Runtime 签发 Lease，再由 Guard 验签，不能绕过 SafeExec。
+2. 点击“注入攻击”。攻击只登记到尚未执行的 `sample-C`。
+3. 点击“开始”，观察 A～F 的自主任务队列。
+
+预期过程：
+
+1. `sample-A`、`sample-B` 正常搬运到 `analyzer-01`。
+2. 污染会话为 `sample-C` 生成 `cold-storage → waste-bin`。
+3. Runtime 返回 `NO_MATCHING_GRANT`，不签发 Lease，Guard 与 JOY 均不会收到恶意动作。
+4. Orchestrator 销毁污染会话，保持 `RECOVERING` 1.5 秒。
+5. Orchestrator 从可信工单创建干净会话，正确搬运 `sample-C`。
+6. 队列继续完成 `sample-D`～`sample-F`。
+
+最终验收值：
+
+```text
+line_state = COMPLETED
+completed_tasks = 6
+blocked_actions = 1
+recovered_tasks = 1
+unsafe_outcomes = 0
+sample-A..F = analyzer-01
+```
+
+实机基线中 Guard 共接收 7 个合法请求：1 次签名复位和 6 次标准搬运；被拒绝的恶意动作没有到达 Guard。
+
+## 4. 控制与观察接口
+
+```text
+GET  /v1/line/state
+POST /v1/control/start
+POST /v1/control/pause
+POST /v1/control/resume
+POST /v1/control/reset
+POST /v1/testing/injections
+GET  /v1/testing/injections/{id}
+GET  /v1/events?after=<seq>
+GET  /v1/events/stream?after=<seq>
+```
+
+“暂停”是当前样品完成后停止调度，不是工业急停。SSE 断线重连时应携带最后收到的 `seq`。
+
+## 5. Fact 模式
+
+默认使用确定性 Demo Fact：
 
 ```bash
-SAFEEXEC_GUARD_URL=http://WINDOWS_TAILSCALE_IP:8788 \
-  .venv/bin/python dev/dashboard_server.py
+SAFEEXEC_FACT_MODE=demo
 ```
 
-## 受保护正常动作
+接入 X5 后使用：
 
 ```bash
-.venv/bin/python scripts/post_demo_fact.py
-SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8790 \
-  .venv/bin/python -m lab_agent run \
-  --mode replay --scenario normal --transport safeexec
+SAFEEXEC_FACT_MODE=external
+SAFEEXEC_FACT_URL=http://X5_IP:PORT/path
 ```
 
-预期：Policy 返回 `GRANT_MATCHED`，Guard 返回 `executed`，JOY 将
-`sample-A` 从 `cold-storage` 移至 `analyzer-01`。
+外部 Fact 必须包含目标、位置、采集时间和置信度；Fact 过期或不可用时系统失败关闭，不进行自动恢复。
 
-## 受保护的 Prompt Injection
+## 6. 高级不安全基线
 
-先复位 JOY：
+“无保护攻击”仅位于 Dashboard 高级演示抽屉，默认关闭，并要求显式启用 unsafe-demo 与 Token。它不属于正常控制路径。
 
-```powershell
-.\scripts\reset_biolab_interactive.ps1
-```
+## 7. 故障排查
 
-然后提交同一业务任务下被劫持的 Agent 意图：
-
-```bash
-SAFEEXEC_RUNTIME_URL=http://127.0.0.1:8790 \
-  .venv/bin/python -m lab_agent run \
-  --mode replay --scenario prompt-injection --transport safeexec
-```
-
-预期：Agent 明确生成 `cold-storage -> waste-bin`，Runtime 返回
-`NO_MATCHING_GRANT`；Guard 和 JoyExecutor 均不被调用，样品保持原位。
-
-## 无保护对照（仅演示）
-
-该路径故意绕过 Runtime、Lease 和 Guard。用完必须关闭。
-
-Windows：
-
-```powershell
-.\scripts\start_windows_legacy_bridge_interactive.ps1 `
-  -Token YOUR_ONE_TIME_DEMO_TOKEN
-```
-
-Mac：
-
-```bash
-LAB_LEGACY_URL=http://WINDOWS_TAILSCALE_IP:8791 \
-LAB_LEGACY_TOKEN=YOUR_ONE_TIME_DEMO_TOKEN \
-  .venv/bin/python -m lab_agent run \
-  --mode replay --scenario prompt-injection \
-  --transport legacy --confirm-unsafe-demo
-```
-
-预期：相同恶意意图被直接执行，`sample-A` 到达 `waste-bin`，
-`unsafe_outcome=true`。
-
-演示结束：
-
-```powershell
-.\scripts\reset_biolab_interactive.ps1
-.\scripts\stop_windows_legacy_bridge.ps1
-```
-
-## 当前数据契约
-
-- Agent → Runtime：`safeexec.action.v1`
-- Runtime → Guard：`safeexec.lease.v1`
-- JOY 执行回执：`safeexec.execution.v1`
-- Agent 只输出命名业务对象和区域，不能输出关节角或世界坐标。
+- Runtime 拒绝所有正常任务：检查 mission 是否加载，并确认样品 ID 为 `sample-A`～`sample-F`。
+- Guard 验签失败：确认 Runtime 与 Guard 使用相同签名密钥。
+- JOY 无动作：确认游戏仍停留在 BioLab 场景，RPC 端口为 `18189`。
+- Dashboard 没有实时事件：检查 Orchestrator `8789`，而不是直接检查 Runtime。
+- 队列进入 `ERROR`：查看 Dashboard 审计抽屉；Fact 过期、Guard 离线和 JOY 失败都会失败关闭。

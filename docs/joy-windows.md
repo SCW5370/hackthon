@@ -48,9 +48,10 @@ powershell -ExecutionPolicy Bypass -File scripts\start_biolab.ps1
 ```
 
 This starts `joy\BioLab_Guardian.py` in the background. It selects
-`MinimalisticIndoor`, creates all named entities, assigns RFID tags, registers
-the six RPCs, and starts the non-blocking arm state machine. No manual scene
-placement is required.
+`MinimalisticIndoor`, creates `sample-A` through `sample-F` in a 2×3 waiting
+grid, assigns unique colors, RFID tags, and destination slots, registers the
+six RPCs, and starts the non-blocking arm state machine. Completed samples do
+not overlap, and no manual scene placement is required.
 
 Stop only the background level runtime with:
 
@@ -107,7 +108,8 @@ The command object handed to the future security layer is:
 `transfer()` validates only structure, known entity names, and current source
 location. It intentionally does not decide whether a business route is safe.
 After the security member validates a command, it should call
-`JoyDriver.transfer()`.
+`JoyDriver.transfer()`. `reset()` restores all six samples and is accepted only
+while the line is not running.
 
 ## Tests
 
@@ -123,5 +125,5 @@ Live JOY smoke test:
 py -m joy.smoke_test
 ```
 
-The smoke test checks the 18189 connection, required unique entities, RFID
+The smoke test checks the 18189 connection, unique A–F entities and RFID
 values, normal transfer, Legacy transfer, Reset, Pause, and Resume.
