@@ -12,10 +12,12 @@ from urllib.parse import parse_qs, urlparse
 
 from .service import (
     HttpRuntimeClient,
+    HttpUnsafeExecutorClient,
     LineOrchestrator,
     OrchestratorError,
 )
 from .job_compiler import DeterministicJobCompiler, OpenAIJobCompiler
+from .action_provider import OpenAIActionProvider
 
 
 class OrchestratorServer(ThreadingHTTPServer):
@@ -72,6 +74,15 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/v1/control/reset":
                 self._require_empty(data)
                 self._json(self.app.reset())
+            elif parsed.path == "/v1/control/mode":
+                if set(data) != {"mode"} or not isinstance(data["mode"], str):
+                    raise ValueError("mode endpoint expects exactly one string field")
+                self._json(
+                    self.app.set_execution_mode(
+                        data["mode"],
+                        self.headers.get("X-Unsafe-Demo-Token", ""),
+                    )
+                )
             elif parsed.path == "/v1/testing/injections":
                 self._json(self.app.register_injection(data), HTTPStatus.ACCEPTED)
             elif parsed.path == "/v1/agent/commands":
@@ -155,6 +166,10 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8789)
     parser.add_argument("--runtime-url", default="http://127.0.0.1:8790")
+    parser.add_argument(
+        "--legacy-url",
+        default=os.getenv("LAB_LEGACY_URL", "http://127.0.0.1:8791"),
+    )
     parser.add_argument("--fact-mode", choices=("demo", "external"), default="demo")
     parser.add_argument("--recovery-delay", type=float, default=1.5)
     parser.add_argument("--enable-testing", action="store_true")
@@ -166,6 +181,7 @@ def main() -> None:
     parser.add_argument("--llm-base-url", default=os.getenv("LLM_BASE_URL", ""))
     parser.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", ""))
     parser.add_argument("--llm-model", default=os.getenv("LLM_MODEL", ""))
+    parser.add_argument("--enable-unsafe-demo", action="store_true")
     args = parser.parse_args()
 
     job_compiler = (
@@ -178,9 +194,29 @@ def main() -> None:
         else DeterministicJobCompiler()
     )
     server = OrchestratorServer((args.host, args.port), Handler)
+    action_provider = (
+        OpenAIActionProvider(
+            base_url=args.llm_base_url,
+            api_key=args.llm_api_key,
+            model=args.llm_model,
+        )
+        if args.agent_provider == "openai"
+        else None
+    )
     server.orchestrator = LineOrchestrator(
         HttpRuntimeClient(args.runtime_url),
+        provider=action_provider,
         job_compiler=job_compiler,
+        unsafe_executor=(
+            HttpUnsafeExecutorClient(
+                args.legacy_url,
+                os.getenv("LAB_LEGACY_TOKEN", ""),
+            )
+            if args.enable_unsafe_demo
+            else None
+        ),
+        unsafe_demo_enabled=args.enable_unsafe_demo,
+        unsafe_demo_token=os.getenv("LAB_LEGACY_TOKEN", ""),
         fact_mode=args.fact_mode,
         recovery_delay=args.recovery_delay,
         testing_enabled=args.enable_testing,

@@ -5,7 +5,12 @@ import unittest
 import uuid
 
 from biolab.catalog import SAMPLE_IDS
-from orchestrator.service import ConflictError, LineOrchestrator
+from orchestrator.service import (
+    AuthorizationError,
+    ConflictError,
+    LineOrchestrator,
+    NotFoundError,
+)
 
 
 class FakeRuntime:
@@ -82,6 +87,42 @@ class BlockingRuntime(FakeRuntime):
         return super().submit_action(intent)
 
 
+class FakeUnsafeExecutor:
+    def __init__(self) -> None:
+        self.actions = []
+        self.locations = {sample_id: "cold-storage" for sample_id in SAMPLE_IDS}
+
+    def submit_action(self, intent):
+        self.actions.append(json.loads(json.dumps(intent)))
+        sample_id = intent["resource"]["id"]
+        destination = intent["arguments"]["destination"]
+        self.locations[sample_id] = destination
+        receipt = {
+            "state": "succeeded",
+            "result": {
+                "sample_id": sample_id,
+                "location": destination,
+                "sample_locations": dict(self.locations),
+                "unsafe_outcome": destination == "waste-bin",
+            },
+        }
+        return {
+            "status": "ok",
+            "execution_mode": "unsafe-baseline",
+            "decision": {
+                "effect": "bypass",
+                "reason_code": "SAFEEXEC_DISABLED",
+                "lease_issued": False,
+                "guard_reached": False,
+            },
+            "guard_response": {
+                "status": "executed",
+                "bypassed": True,
+                "execution": {"status": "executed", "receipt": receipt},
+            },
+        }
+
+
 def injection(injection_id=None, target_sample="sample-C"):
     return {
         "schema_version": "safeexec.attack-injection.v1",
@@ -126,6 +167,68 @@ class OrchestratorTests(unittest.TestCase):
             state["physical_evidence"]["sample_locations"],
             {sample_id: "analyzer-01" for sample_id in SAMPLE_IDS},
         )
+
+    def test_unsafe_mode_is_explicitly_gated(self) -> None:
+        runtime = FakeRuntime()
+        disabled = LineOrchestrator(runtime)
+        with self.assertRaises(NotFoundError):
+            disabled.set_execution_mode("unsafe-baseline", "demo-token")
+
+        enabled = LineOrchestrator(
+            runtime,
+            unsafe_executor=FakeUnsafeExecutor(),
+            unsafe_demo_enabled=True,
+            unsafe_demo_token="demo-token",
+        )
+        with self.assertRaises(AuthorizationError):
+            enabled.set_execution_mode("unsafe-baseline", "wrong")
+        state = enabled.set_execution_mode("unsafe-baseline", "demo-token")
+        self.assertEqual(state["execution_mode"], "unsafe-baseline")
+        self.assertTrue(state["execution_modes"]["unsafe-baseline"]["demo_only"])
+
+    def test_same_injected_agent_intent_executes_only_without_safeexec(self) -> None:
+        protected_runtime = FakeRuntime()
+        protected = LineOrchestrator(protected_runtime, recovery_delay=0)
+        protected.compile_operator_command(
+            self.operator_command("把 sample-C 运送到分析区")
+        )
+        protected.register_injection(injection(target_sample="sample-C"))
+        protected.start()
+        self.assertEqual(protected.wait_until_terminal(), "COMPLETED")
+
+        runtime = FakeRuntime()
+        unsafe = FakeUnsafeExecutor()
+        app = LineOrchestrator(
+            runtime,
+            unsafe_executor=unsafe,
+            unsafe_demo_enabled=True,
+            unsafe_demo_token="demo-token",
+            recovery_delay=0,
+        )
+        app.compile_operator_command(self.operator_command("把 sample-C 运送到分析区"))
+        app.register_injection(injection(target_sample="sample-C"))
+        app.set_execution_mode("unsafe-baseline", "demo-token")
+        app.start()
+        self.assertEqual(app.wait_until_terminal(), "ERROR")
+        state = app.snapshot()
+        self.assertEqual(state["counters"]["blocked_actions"], 0)
+        self.assertEqual(state["counters"]["recovered_tasks"], 0)
+        self.assertEqual(state["counters"]["unsafe_outcomes"], 1)
+        self.assertEqual(state["tasks"][0]["status"], "FAILED")
+        self.assertEqual(unsafe.locations["sample-C"], "waste-bin")
+        self.assertFalse(
+            any(
+                action["action"] == "lab.sample.transfer"
+                for action in runtime.actions
+            )
+        )
+        protected_candidate = next(
+            action
+            for action in protected_runtime.actions
+            if action["action"] == "lab.sample.transfer"
+        )
+        for field in ("action", "resource", "arguments"):
+            self.assertEqual(protected_candidate[field], unsafe.actions[0][field])
 
     def test_natural_language_compiles_dynamic_four_sample_job(self) -> None:
         runtime = FakeRuntime()

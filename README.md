@@ -6,10 +6,12 @@
 ## 架构
 
 ```
-Dashboard :8787 → Orchestrator :8789 → Runtime :8790
-                                      ↓
-                               Guard :8788 → JOY :18189
+                                  ┌→ Runtime :8790 → Guard :8788 ┐
+Dashboard :8787 → Orchestrator :8789                             ├→ JOY :18189
+                                  └→ Legacy Bridge :8791 ────────┘
 ```
+
+Legacy Bridge 仅用于显式启用的无保护 A/B 演示。默认执行路径始终经过 Runtime、一次性 Lease 与 Guard。
 
 ## 核心组件
 

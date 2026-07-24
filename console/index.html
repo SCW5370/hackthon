@@ -35,6 +35,27 @@
 
   <div class="notice" id="notice" role="status" hidden></div>
 
+  <section class="mode-bar" id="mode-bar" aria-labelledby="mode-title">
+    <div class="mode-copy">
+      <span class="mode-indicator" id="mode-indicator" aria-hidden="true"></span>
+      <div>
+        <h2 id="mode-title">执行路径</h2>
+        <p id="mode-description">Agent 动作经过 Policy、Lease 与 Guard 后才可到达 JOY</p>
+      </div>
+    </div>
+    <div class="mode-actions" role="group" aria-label="选择执行路径">
+      <button id="mode-protected-btn" class="mode-choice" aria-pressed="true">启用 SafeExec</button>
+      <button id="mode-unsafe-btn" class="mode-choice danger-choice" aria-pressed="false">不启用（对照）</button>
+      <label class="mode-token">
+        对照 Token
+        <input id="unsafe-token" type="password" autocomplete="off" placeholder="仅切换时使用">
+      </label>
+    </div>
+    <p class="mode-warning" id="mode-warning" hidden>
+      演示基线正在运行：动作将绕过 Runtime、Lease 与 Guard，恶意意图可直接到达机械臂。
+    </p>
+  </section>
+
   <section class="command-deck" aria-label="Agent任务输入">
     <form class="command-block trusted-command" id="job-form">
       <div class="command-heading">
@@ -190,12 +211,6 @@
       <button id="audit-close" aria-label="关闭审计">关闭</button>
     </div>
     <ol id="audit-list"></ol>
-    <details class="advanced">
-      <summary>高级演示：无保护基线</summary>
-      <p>该路径会绕过 SafeExec，仅在显式启用 unsafe-demo 并提供 Token 后可用。</p>
-      <label>演示 Token <input id="unsafe-token" type="password" autocomplete="off"></label>
-      <button id="unsafe-btn" class="attack">执行无保护 sample-C → 废弃区</button>
-    </details>
   </aside>
   <div class="scrim" id="scrim" hidden></div>
 

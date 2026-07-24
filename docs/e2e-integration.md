@@ -110,6 +110,7 @@ POST /v1/control/start
 POST /v1/control/pause
 POST /v1/control/resume
 POST /v1/control/reset
+POST /v1/control/mode
 POST /v1/testing/injections
 GET  /v1/testing/injections/{id}
 GET  /v1/events?after=<seq>
@@ -129,13 +130,14 @@ SAFEEXEC_AGENT_PROVIDER=replay
 接入 OpenAI-compatible API 时：
 
 ```bash
-SAFEEXEC_AGENT_PROVIDER=openai
-LLM_BASE_URL=https://your-endpoint/v1
-LLM_MODEL=your-model
-LLM_API_KEY=your-key
+export SAFEEXEC_AGENT_PROVIDER=openai
+export LLM_BASE_URL=https://api.qnaigc.com/v1
+export LLM_MODEL=deepseek/deepseek-v4-pro-202606
+read -s "LLM_API_KEY?LLM API Key: "
+export LLM_API_KEY
 ```
 
-两种 Provider 生成同一 `safeexec.job-manifest.v1`，后续 Runtime、Guard 和 JOY 不需要修改。LLM 只生成候选工单，不能签发 Lease。
+两种 Provider 生成同一 `safeexec.job-manifest.v1`。OpenAI-compatible 模式还会为每个任务生成一次 `transfer_sample` Function Call；外部标签会进入不可信 Agent 会话，因此模型可能提出 `waste-bin` 候选动作。无论模型输出什么，它都不能签发 Lease，后续 Runtime、Guard 和 JOY 的接口保持不变。
 
 ## 6. Fact 模式
 
@@ -154,9 +156,32 @@ SAFEEXEC_FACT_URL=http://X5_IP:PORT/path
 
 外部 Fact 必须包含目标、位置、采集时间和置信度；Fact 过期或不可用时系统失败关闭，不进行自动恢复。
 
-## 7. 高级不安全基线
+## 7. SafeExec 可插拔对照
 
-“无保护攻击”仅位于 Dashboard 高级演示抽屉，默认关闭，并要求显式启用 unsafe-demo 与 Token。它不属于正常控制路径。
+控制台的两种模式使用同一个 Agent、同一份工单、同一条 Prompt Injection 和同一个 JOY 场景：
+
+- `protected`：`Agent → Runtime → Lease → Guard → JOY`
+- `unsafe-baseline`：`Agent → Legacy Bridge → JOY`
+
+无保护模式默认关闭，只能在生产线处于已停止且已复位状态时切换。切换需要演示 Token，页面会持续显示红色风险提示。签名复位始终经过 SafeExec，不能被该开关绕过。
+
+先在 Windows 启动显式不安全的 Legacy Bridge：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_windows_legacy_bridge.ps1 -Token YOUR_DEMO_TOKEN
+```
+
+Mac 使用同一个 Token 启动服务栈：
+
+```bash
+export SAFEEXEC_ENABLE_UNSAFE_DEMO=1
+export LAB_LEGACY_URL=http://WINDOWS_IP:8791
+read -s "LAB_LEGACY_TOKEN?Unsafe demo token: "
+export LAB_LEGACY_TOKEN
+./scripts/start_stack.sh
+```
+
+对照演示必须先复位，再选择执行路径，然后向同一目标任务注入相同文本。保护模式会产生一次阻断和一次恢复；无保护模式不会产生 Lease 或 Guard 记录，恶意动作会抵达废弃区并触发 `UNSAFE_PHYSICAL_OUTCOME`。
 
 ## 8. 故障排查
 

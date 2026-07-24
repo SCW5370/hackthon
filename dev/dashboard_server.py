@@ -7,7 +7,6 @@ processes. It controls the persistent Orchestrator and reads physical evidence.
 from __future__ import annotations
 
 import argparse
-import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -19,9 +18,6 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
-
-from lab_agent.contracts import ActionPlan, build_action_intent
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CONSOLE = ROOT / "console"
@@ -81,16 +77,10 @@ class DashboardBackend:
         orchestrator_url: str,
         guard_url: str,
         runtime_url: str,
-        legacy_url: str,
-        legacy_token: str,
-        enable_unsafe_demo: bool,
     ) -> None:
         self.orchestrator_url = orchestrator_url.rstrip("/")
         self.guard_url = guard_url.rstrip("/")
         self.runtime_url = runtime_url.rstrip("/")
-        self.legacy_url = legacy_url.rstrip("/")
-        self.legacy_token = legacy_token
-        self.enable_unsafe_demo = enable_unsafe_demo
         self._last_physical: dict[str, Any] | None = None
 
     def snapshot(self) -> dict[str, Any]:
@@ -125,7 +115,6 @@ class DashboardBackend:
             "line": line,
             "physical": physical,
             "physical_status": physical_status,
-            "unsafe_demo_enabled": self.enable_unsafe_demo,
         }
 
     @staticmethod
@@ -182,22 +171,17 @@ class DashboardBackend:
             timeout=5,
         )
 
-    def run_unsafe_baseline(self, provided_token: str) -> dict[str, Any]:
-        if not self.enable_unsafe_demo:
-            raise UpstreamError(HTTPStatus.NOT_FOUND, "unsafe demo is disabled")
-        if not self.legacy_token or not hmac.compare_digest(
-            provided_token, self.legacy_token
-        ):
-            raise UpstreamError(HTTPStatus.UNAUTHORIZED, "invalid unsafe demo token")
-        intent = build_action_intent(
-            ActionPlan("sample-C", "cold-storage", "waste-bin")
-        )
+    def set_execution_mode(
+        self,
+        mode: str,
+        provided_token: str,
+    ) -> dict[str, Any]:
         return json_request(
-            f"{self.legacy_url}/legacy/v1/execute",
+            f"{self.orchestrator_url}/v1/control/mode",
             method="POST",
-            payload=intent,
-            headers={"X-Legacy-Demo-Token": self.legacy_token},
-            timeout=150,
+            payload={"mode": mode},
+            headers={"X-Unsafe-Demo-Token": provided_token},
+            timeout=5,
         )
 
 
@@ -251,10 +235,13 @@ class Handler(BaseHTTPRequestHandler):
                     self.backend.submit_operator_command(self._body()),
                     HTTPStatus.CREATED,
                 )
-            elif parsed.path == "/api/advanced/unsafe-baseline":
-                self._require_empty(self._body())
+            elif parsed.path == "/api/control/mode":
+                value = self._body()
+                if set(value) != {"mode"} or not isinstance(value["mode"], str):
+                    raise ValueError("mode endpoint expects exactly one string field")
                 self._json(
-                    self.backend.run_unsafe_baseline(
+                    self.backend.set_execution_mode(
+                        value["mode"],
                         self.headers.get("X-Unsafe-Demo-Token", "")
                     )
                 )
@@ -366,10 +353,6 @@ def main() -> None:
         "--guard-url",
         default=os.environ.get("SAFEEXEC_GUARD_URL", "http://127.0.0.1:8788"),
     )
-    parser.add_argument(
-        "--legacy-url",
-        default=os.environ.get("LAB_LEGACY_URL", "http://127.0.0.1:8791"),
-    )
     args = parser.parse_args()
 
     server = DashboardServer((args.host, args.port), Handler)
@@ -377,9 +360,6 @@ def main() -> None:
         orchestrator_url=args.orchestrator_url,
         runtime_url=args.runtime_url,
         guard_url=args.guard_url,
-        legacy_url=args.legacy_url,
-        legacy_token=os.environ.get("LAB_LEGACY_TOKEN", ""),
-        enable_unsafe_demo=os.environ.get("SAFEEXEC_ENABLE_UNSAFE_DEMO") == "1",
     )
     print(f"SafeExec Dashboard listening on http://{args.host}:{args.port}", flush=True)
     server.serve_forever()

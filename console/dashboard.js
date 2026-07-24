@@ -21,9 +21,11 @@ const ui = Object.fromEntries([
   "physical-source", "arm-state", "platform-state", "dock-state", "location-map",
   "physical-verdict", "metric-completed", "metric-blocked", "metric-recovered",
   "metric-unsafe", "recent-events-list", "scroll-toggle", "audit-drawer",
-  "audit-close", "audit-list", "scrim", "unsafe-token", "unsafe-btn",
+  "audit-close", "audit-list", "scrim", "unsafe-token",
   "job-form", "operator-command", "compile-btn", "compiled-job", "provider-chip",
   "attack-form", "injection-target", "injection-content", "job-caption",
+  "mode-bar", "mode-indicator", "mode-description", "mode-warning",
+  "mode-protected-btn", "mode-unsafe-btn",
 ].map(id => [id, document.getElementById(id)]));
 
 let snapshot = null;
@@ -71,12 +73,30 @@ function render() {
     ui[`${action}-btn`].disabled = !line.controls?.[action];
   }
   ui["compile-btn"].disabled = !line.controls?.configure;
+  renderExecutionMode(line);
   renderJob(line);
   renderInjectionTargets(line);
   renderTasks(line);
   renderTrace(line);
   renderPhysical(snapshot.physical, snapshot.physical_status, line.counters);
   renderMetrics(line.counters);
+}
+
+function renderExecutionMode(line) {
+  const unsafe = line.execution_mode === "unsafe-baseline";
+  const canChange = Boolean(line.controls?.mode);
+  const unsafeAvailable = Boolean(line.execution_modes?.["unsafe-baseline"]?.available);
+  ui["mode-bar"].classList.toggle("unsafe", unsafe);
+  ui["mode-indicator"].className = `mode-indicator ${unsafe ? "unsafe" : "protected"}`;
+  ui["mode-description"].textContent = unsafe
+    ? "Agent 动作绕过 Runtime、Lease 与 Guard，直接交给 Legacy Bridge"
+    : "Agent 动作经过 Policy、Lease 与 Guard 后才可到达 JOY";
+  ui["mode-warning"].hidden = !unsafe;
+  ui["mode-protected-btn"].setAttribute("aria-pressed", String(!unsafe));
+  ui["mode-unsafe-btn"].setAttribute("aria-pressed", String(unsafe));
+  ui["mode-protected-btn"].disabled = !canChange || !unsafe;
+  ui["mode-unsafe-btn"].disabled = !canChange || unsafe || !unsafeAvailable;
+  ui["unsafe-token"].disabled = !canChange || unsafe || !unsafeAvailable;
 }
 
 function renderJob(line) {
@@ -157,7 +177,9 @@ function renderTrace(line) {
     : "Agent 正在根据可信工单规划");
   const decision = task.blocked_decision || task.decision;
   setText("safeexec-decision", decision
-    ? `${String(decision.effect).toUpperCase()} · ${decision.reason_code}`
+    ? decision.effect === "bypass"
+      ? "BYPASS · SafeExec 未启用，未执行策略检查"
+      : `${String(decision.effect).toUpperCase()} · ${decision.reason_code}`
     : "等待 Runtime 决策");
   const recovering = task.status === "RECOVERING" || line.line_state === "RECOVERING";
   const recovered = task.status === "COMPLETED" && task.attempt > 1;
@@ -254,12 +276,16 @@ function eventMessage(event) {
   const messages = {
     "job.compiled": `Agent 已将自然语言编译为 ${p.sample_ids?.length || 0} 件样品工单`,
     "line.started": `自主生产线开始处理 ${p.task_count || 0} 件样品`,
+    "execution.mode.changed": p.safeexec_enabled
+      ? "执行路径切回 SafeExec 保护模式"
+      : "执行路径切换为无保护演示基线",
     "attack.injected": `不可信输入已投递到 ${p.task_id || "目标任务"}`,
     "intent.proposed": `${p.sample_id || "Agent"} 提议前往 ${LOCATION_LABELS[p.destination] || p.destination || "目标位置"}`,
     "task.blocked": `SafeExec 拒绝：${p.reason_code || "未授权动作"}，未签发 Lease`,
     "agent.session.terminated": "污染会话已销毁",
     "task.recovering": "从可信工单创建干净会话",
     "task.completed": `${p.sample_id || p.task_id} 已到分析区${p.recovered ? "（恢复后）" : ""}`,
+    "unsafe.action.executed": `${p.sample_id || "样品"} 已在无保护模式下到达废弃区`,
     "line.completed": `${p.task_count || "全部"}件样品任务完成`,
     "line.paused": "生产线已在当前件完成后暂停",
     "line.error": `失败关闭：${p.code || "未知错误"}`,
@@ -287,7 +313,8 @@ function connectStream() {
     "line.completed", "line.error", "task.planning", "task.submitted", "task.executing",
     "task.blocked", "task.recovering", "task.completed", "task.failed", "attack.injected",
     "agent.session.created", "agent.session.compromised", "agent.session.terminated",
-    "agent.session.recovered", "intent.proposed",
+    "agent.session.recovered", "intent.proposed", "execution.mode.changed",
+    "unsafe.action.executed",
   ];
   for (const eventName of named) stream.addEventListener(eventName, handleStreamEvent);
   stream.onerror = () => {
@@ -397,16 +424,28 @@ function closeAudit() {
   ui["audit-btn"].focus();
 }
 
-async function unsafeBaseline() {
-  if (!window.confirm("该操作会绕过 SafeExec 并产生危险物理动作。确认仅用于隔离演示？")) return;
+async function setExecutionMode(mode) {
+  const unsafe = mode === "unsafe-baseline";
+  if (unsafe && !ui["unsafe-token"].value) {
+    showNotice("请输入对照演示 Token", true);
+    ui["unsafe-token"].focus();
+    return;
+  }
+  if (unsafe && !window.confirm(
+    "切换后，同一 Agent 的动作将绕过 SafeExec 并可能造成危险物理结果。确认仅用于隔离对照演示？"
+  )) return;
   try {
-    await request("/api/advanced/unsafe-baseline", {
+    await request("/api/control/mode", {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({mode}),
       headers: {"X-Unsafe-Demo-Token": ui["unsafe-token"].value},
     });
-    showNotice("无保护动作已执行；请立即通过签名复位恢复场景", true);
+    ui["unsafe-token"].value = "";
     await loadSnapshot();
+    showNotice(
+      unsafe ? "已进入无保护对照模式" : "已恢复 SafeExec 保护模式",
+      unsafe,
+    );
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -427,7 +466,8 @@ function bind() {
   ui["audit-btn"].addEventListener("click", openAudit);
   ui["audit-close"].addEventListener("click", closeAudit);
   ui.scrim.addEventListener("click", closeAudit);
-  ui["unsafe-btn"].addEventListener("click", unsafeBaseline);
+  ui["mode-protected-btn"].addEventListener("click", () => setExecutionMode("protected"));
+  ui["mode-unsafe-btn"].addEventListener("click", () => setExecutionMode("unsafe-baseline"));
   ui["scroll-toggle"].addEventListener("click", () => {
     scrollPaused = !scrollPaused;
     ui["scroll-toggle"].textContent = scrollPaused ? "继续滚动" : "暂停滚动";

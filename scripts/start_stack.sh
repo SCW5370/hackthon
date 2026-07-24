@@ -8,6 +8,10 @@ PRIVATE_KEY="${SAFEEXEC_PRIVATE_KEY:-${SAFEEXEC_ROOT}/.run/private_key.txt}"
 GUARD_URL="${SAFEEXEC_GUARD_URL:-http://127.0.0.1:8788}"
 FACT_MODE="${SAFEEXEC_FACT_MODE:-demo}"
 AGENT_PROVIDER="${SAFEEXEC_AGENT_PROVIDER:-replay}"
+LLM_BASE_URL="${LLM_BASE_URL:-https://api.qnaigc.com/v1}"
+LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v4-pro-202606}"
+LEGACY_URL="${LAB_LEGACY_URL:-http://127.0.0.1:8791}"
+UNSAFE_DEMO="${SAFEEXEC_ENABLE_UNSAFE_DEMO:-0}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Python environment not found: ${PYTHON_BIN}" >&2
@@ -17,8 +21,17 @@ if [[ ! -f "${PRIVATE_KEY}" ]]; then
   echo "Runtime private key not found: ${PRIVATE_KEY}" >&2
   exit 1
 fi
+if [[ "${AGENT_PROVIDER}" == "openai" && -z "${LLM_API_KEY:-}" ]]; then
+  echo "LLM_API_KEY is required when SAFEEXEC_AGENT_PROVIDER=openai" >&2
+  exit 1
+fi
+if [[ "${UNSAFE_DEMO}" == "1" && -z "${LAB_LEGACY_TOKEN:-}" ]]; then
+  echo "LAB_LEGACY_TOKEN is required when unsafe baseline is enabled" >&2
+  exit 1
+fi
 
 mkdir -p "${RUN_DIR}"
+export LLM_BASE_URL LLM_MODEL
 
 start_service() {
   local name="$1"
@@ -42,15 +55,21 @@ start_service runtime \
   --key "${PRIVATE_KEY}" \
   --guard-url "${GUARD_URL}/v1/execute"
 
-start_service orchestrator \
-  "${PYTHON_BIN}" -m orchestrator.orchestrator_http \
+ORCHESTRATOR_ARGS=(
+  "${PYTHON_BIN}" -m orchestrator.orchestrator_http
   --host 127.0.0.1 \
   --port 8789 \
   --runtime-url http://127.0.0.1:8790 \
+  --legacy-url "${LEGACY_URL}" \
   --fact-mode "${FACT_MODE}" \
   --agent-provider "${AGENT_PROVIDER}" \
   --recovery-delay 1.5 \
   --enable-testing
+)
+if [[ "${UNSAFE_DEMO}" == "1" ]]; then
+  ORCHESTRATOR_ARGS+=(--enable-unsafe-demo)
+fi
+start_service orchestrator "${ORCHESTRATOR_ARGS[@]}"
 
 start_service dashboard \
   "${PYTHON_BIN}" -m dev.dashboard_server \

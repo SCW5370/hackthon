@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hmac
 import json
 import re
 import threading
@@ -61,11 +62,16 @@ OPERATOR_COMMAND_FIELDS = {
     "requested_by",
     "submitted_at_ms",
 }
+EXECUTION_MODES = {"protected", "unsafe-baseline"}
 
 
 class RuntimeClient(Protocol):
     def publish_camera_fact(self) -> dict[str, Any]: ...
 
+    def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class UnsafeExecutorClient(Protocol):
     def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]: ...
 
 
@@ -111,6 +117,57 @@ class HttpRuntimeClient:
         return value
 
 
+class HttpUnsafeExecutorClient:
+    """Explicit demo-only transport that bypasses Runtime and Guard."""
+
+    def __init__(self, base_url: str, token: str, timeout: float = 150.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout = timeout
+
+    def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]:
+        request = Request(
+            f"{self.base_url}/legacy/v1/execute",
+            data=json.dumps(intent).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Legacy-Demo-Token": self.token,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                receipt = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Legacy Bridge HTTP {exc.code}: {detail}") from exc
+        except (TimeoutError, URLError) as exc:
+            raise ConnectionError(f"Legacy Bridge unavailable: {exc}") from exc
+        if not isinstance(receipt, dict):
+            raise RuntimeError("Legacy Bridge returned a non-object response")
+        succeeded = receipt.get("state") == "succeeded"
+        return {
+            "status": "ok" if succeeded else "error",
+            "execution_mode": "unsafe-baseline",
+            "decision": {
+                "effect": "bypass",
+                "reason_code": "SAFEEXEC_DISABLED",
+                "lease_issued": False,
+                "guard_reached": False,
+            },
+            # This compatibility envelope lets the Orchestrator consume the
+            # same JOY receipt without pretending that Guard was reached.
+            "guard_response": {
+                "status": "executed" if succeeded else "failed",
+                "bypassed": True,
+                "execution": {
+                    "status": "executed" if succeeded else "failed",
+                    "receipt": receipt,
+                },
+            },
+        }
+
+
 class ReplayProvider:
     """Deterministic stand-in for a tool-calling Agent.
 
@@ -123,7 +180,9 @@ class ReplayProvider:
         sample_id: str,
         *,
         contaminated: bool,
+        untrusted_input: str | None = None,
     ) -> ActionPlan:
+        del untrusted_input
         return ActionPlan(
             sample_id,
             "cold-storage",
@@ -156,8 +215,11 @@ class LineOrchestrator:
         self,
         runtime: RuntimeClient,
         *,
-        provider: ReplayProvider | None = None,
+        provider: Any | None = None,
         job_compiler: Any | None = None,
+        unsafe_executor: UnsafeExecutorClient | None = None,
+        unsafe_demo_enabled: bool = False,
+        unsafe_demo_token: str = "",
         fact_mode: str = "demo",
         recovery_delay: float = 1.5,
         testing_enabled: bool = True,
@@ -168,6 +230,10 @@ class LineOrchestrator:
         self.runtime = runtime
         self.provider = provider or ReplayProvider()
         self.job_compiler = job_compiler or DeterministicJobCompiler()
+        self.unsafe_executor = unsafe_executor
+        self.unsafe_demo_enabled = unsafe_demo_enabled
+        self.unsafe_demo_token = unsafe_demo_token
+        self.execution_mode = "protected"
         self.fact_mode = fact_mode
         self.recovery_delay = recovery_delay
         self.testing_enabled = testing_enabled
@@ -253,6 +319,7 @@ class LineOrchestrator:
                 "status": "ok",
                 "line_state": self._line_state,
                 "fact_mode": self.fact_mode,
+                "execution_mode": self.execution_mode,
                 "worker_alive": bool(self._worker and self._worker.is_alive()),
             }
 
@@ -282,6 +349,16 @@ class LineOrchestrator:
                 "last_error": json.loads(json.dumps(self._last_error)),
                 "last_seq": self._seq,
                 "fact_mode": self.fact_mode,
+                "execution_mode": self.execution_mode,
+                "execution_modes": {
+                    "protected": {"available": True},
+                    "unsafe-baseline": {
+                        "available": bool(
+                            self.unsafe_demo_enabled and self.unsafe_executor
+                        ),
+                        "demo_only": True,
+                    },
+                },
                 "controls": self._controls(),
             }
 
@@ -294,7 +371,40 @@ class LineOrchestrator:
             "reset": state in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"},
             "configure": state == "STOPPED",
             "inject": state in {"STOPPED", "RUNNING", "PAUSE_PENDING", "PAUSED"},
+            "mode": state == "STOPPED"
+            and all(task["status"] == "QUEUED" for task in self._tasks)
+            and not any(self._counters.values()),
         }
+
+    def set_execution_mode(self, mode: str, provided_token: str = "") -> dict[str, Any]:
+        if mode not in EXECUTION_MODES:
+            raise ValidationError("execution mode must be protected or unsafe-baseline")
+        with self._lock:
+            if not self._controls()["mode"]:
+                raise ConflictError(
+                    "execution mode can change only on a stopped, reset line"
+                )
+            if mode == "unsafe-baseline":
+                if not self.unsafe_demo_enabled or self.unsafe_executor is None:
+                    raise NotFoundError("unsafe baseline is disabled")
+                if not self.unsafe_demo_token or not hmac.compare_digest(
+                    provided_token,
+                    self.unsafe_demo_token,
+                ):
+                    raise AuthorizationError("invalid unsafe demo token")
+            previous = self.execution_mode
+            self.execution_mode = mode
+            self._emit(
+                "execution.mode.changed",
+                "orchestrator",
+                {
+                    "previous": previous,
+                    "current": mode,
+                    "safeexec_enabled": mode == "protected",
+                },
+                "critical" if mode == "unsafe-baseline" else "info",
+            )
+            return self.snapshot()
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -307,6 +417,7 @@ class LineOrchestrator:
                 {
                     "task_count": len(self._tasks),
                     "job_id": self._job_manifest["job_id"],
+                    "execution_mode": self.execution_mode,
                 },
             )
             self._ensure_worker()
@@ -666,7 +777,11 @@ class LineOrchestrator:
                 "agent",
                 {"task_id": task["task_id"], "attempt": task["attempt"]},
             )
-        plan = self.provider.plan(task["sample_id"], contaminated=contaminated)
+        plan = self.provider.plan(
+            task["sample_id"],
+            contaminated=contaminated,
+            untrusted_input=task.get("untrusted_input") if contaminated else None,
+        )
         intent = build_action_intent(plan)
         with self._lock:
             task["intent"] = intent
@@ -688,11 +803,22 @@ class LineOrchestrator:
                 "orchestrator",
                 {"task_id": task["task_id"], "request_id": intent["request_id"]},
             )
-        if self.fact_mode == "demo" and not contaminated:
+        if (
+            self.execution_mode == "protected"
+            and self.fact_mode == "demo"
+            and not contaminated
+        ):
             fact_result = self.runtime.publish_camera_fact()
             if fact_result.get("status") != "ok":
                 raise RuntimeError(f"demo Fact rejected: {fact_result!r}")
-        response = self.runtime.submit_action(intent)
+        if self.execution_mode == "protected":
+            response = self.runtime.submit_action(intent)
+            execution_source = "guard"
+        else:
+            if self.unsafe_executor is None:
+                raise RuntimeError("unsafe baseline executor is unavailable")
+            response = self.unsafe_executor.submit_action(intent)
+            execution_source = "legacy_bridge"
         with self._lock:
             task["decision"] = response.get("decision")
         if self._deny_reason(response) is None:
@@ -700,8 +826,13 @@ class LineOrchestrator:
                 task["status"] = "EXECUTING"
                 self._emit(
                     "task.executing",
-                    "guard",
-                    {"task_id": task["task_id"], "request_id": intent["request_id"]},
+                    execution_source,
+                    {
+                        "task_id": task["task_id"],
+                        "request_id": intent["request_id"],
+                        "execution_mode": self.execution_mode,
+                    },
+                    "critical" if self.execution_mode == "unsafe-baseline" else "info",
                 )
         return response
 
@@ -795,14 +926,56 @@ class LineOrchestrator:
         self._assert_execution_succeeded(response, action="lab.sample.transfer")
         unsafe = self._unsafe_outcome(response)
         with self._lock:
-            task["status"] = "COMPLETED"
             task["error"] = None
-            self._counters["completed_tasks"] += 1
             self._counters["unsafe_outcomes"] += int(unsafe)
             self._record_physical_from_response(
                 response,
                 fallback_dock=task["destination"],
             )
+            if unsafe:
+                task["status"] = "FAILED"
+                task["error"] = {
+                    "code": "UNSAFE_PHYSICAL_OUTCOME",
+                    "detail": "unprotected Agent action reached the physical executor",
+                }
+                injection_id = self._injection_by_task.get(task["task_id"])
+                if injection_id is not None:
+                    record = self._injections[injection_id]
+                    record["state"] = "executed"
+                    record["updated_at_ms"] = int(time.time() * 1000)
+                    record["result"] = {
+                        "effect": "bypass",
+                        "reason_code": "SAFEEXEC_DISABLED",
+                        "lease_issued": False,
+                        "guard_reached": False,
+                        "unsafe_outcome": True,
+                    }
+                self._emit(
+                    "unsafe.action.executed",
+                    "legacy_bridge",
+                    {
+                        "task_id": task["task_id"],
+                        "sample_id": task["sample_id"],
+                        "destination": "waste-bin",
+                        "reason_code": "SAFEEXEC_DISABLED",
+                    },
+                    "critical",
+                )
+                self._line_state = "ERROR"
+                self._last_error = {
+                    "code": "UNSAFE_PHYSICAL_OUTCOME",
+                    "task_id": task["task_id"],
+                }
+                self._emit(
+                    "line.error",
+                    "orchestrator",
+                    self._last_error,
+                    "critical",
+                )
+                return
+
+            task["status"] = "COMPLETED"
+            self._counters["completed_tasks"] += 1
             if recovered:
                 self._counters["recovered_tasks"] += 1
                 self._emit(
@@ -819,23 +992,11 @@ class LineOrchestrator:
                 {
                     "task_id": task["task_id"],
                     "sample_id": task["sample_id"],
-                    "destination": "analyzer-01",
+                    "destination": task["intent"]["arguments"]["destination"],
                     "recovered": recovered,
                     "unsafe_outcome": unsafe,
                 },
             )
-            if unsafe:
-                self._line_state = "ERROR"
-                self._last_error = {
-                    "code": "UNSAFE_PHYSICAL_OUTCOME",
-                    "task_id": task["task_id"],
-                }
-                self._emit(
-                    "line.error",
-                    "orchestrator",
-                    self._last_error,
-                    "critical",
-                )
 
     @staticmethod
     def _execution_result(response: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -987,3 +1148,7 @@ class ConflictError(OrchestratorError):
 
 class NotFoundError(OrchestratorError):
     status = 404
+
+
+class AuthorizationError(OrchestratorError):
+    status = 401

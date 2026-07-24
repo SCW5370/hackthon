@@ -11,9 +11,6 @@ class DashboardServerTests(unittest.TestCase):
             orchestrator_url="http://orchestrator",
             runtime_url="http://runtime",
             guard_url="http://guard",
-            legacy_url="http://legacy",
-            legacy_token="",
-            enable_unsafe_demo=False,
         )
 
     def test_snapshot_combines_orchestrator_and_physical_evidence(self) -> None:
@@ -88,10 +85,23 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(mocked.call_count, 1)
 
-    def test_unsafe_baseline_is_disabled_by_default(self) -> None:
-        with self.assertRaises(UpstreamError) as raised:
-            self.backend.run_unsafe_baseline("")
-        self.assertEqual(raised.exception.status, 404)
+    def test_execution_mode_is_forwarded_to_orchestrator(self) -> None:
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value={"execution_mode": "unsafe-baseline"},
+        ) as mocked:
+            result = self.backend.set_execution_mode(
+                "unsafe-baseline",
+                "demo-token",
+            )
+        self.assertEqual(result["execution_mode"], "unsafe-baseline")
+        mocked.assert_called_once_with(
+            "http://orchestrator/v1/control/mode",
+            method="POST",
+            payload={"mode": "unsafe-baseline"},
+            headers={"X-Unsafe-Demo-Token": "demo-token"},
+            timeout=5,
+        )
 
     def test_untrusted_content_is_rendered_with_text_content_only(self) -> None:
         source = Path("console/dashboard.js").read_text(encoding="utf-8")
