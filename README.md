@@ -1,21 +1,14 @@
-# SafeExec V1 - Robot Action Safety Runtime
+# SafeExec V2 — Autonomous BioLab Line
 
-> 多 Agent 机器人的动作信任层
-> Factory Agent 负责提出"要做什么"，SafeExec 负责决定"这个动作现在能不能执行"。
+> 面向具身 Agent 的零信任执行 Runtime。
+> BioLab Agent 持续提出动作，SafeExec 决定动作是否可在真实设备上执行。
 
 ## 架构
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Lab Agent     │ ──▶ │  SafeExec       │ ──▶ │  Guard          │
-│  (ActionIntent) │     │  Runtime        │     │  (Lease 验签)   │
-└─────────────────┘     │  (Policy+Lease) │     └────────┬────────┘
-                        └─────────────────┘              │
-                                                         ▼
-                                                  ┌───────────────┐
-                                                  │ JoyExecutor   │
-                                                  │ (机械臂控制)   │
-                                                  └───────────────┘
+Dashboard :8787 → Orchestrator :8789 → Runtime :8790
+                                      ↓
+                               Guard :8788 → JOY :18189
 ```
 
 ## 核心组件
@@ -26,6 +19,8 @@
 | **Lease Authority** | Ed25519 签名签发 5 秒 Lease |
 | **Fact Hub** | 存储摄像头等实时状态，支持 TTL 过期 |
 | **Guard** | 验签 + SQLite 防重放 + 执行拦截 |
+| **Orchestrator** | 六任务队列、Agent 会话、攻击注入与单次恢复 |
+| **Dashboard** | 控制常驻生产线并按事件序号增量展示证据 |
 
 ## 安全机制
 
@@ -44,14 +39,14 @@ pip install pynacl pyyaml
 # 生成密钥对
 python scripts/gen_keys.py --private-key guard/keys/private_key.txt --public-key guard/keys/public_key.txt
 
-# 运行演示
-python scripts/demo.py
+# Windows 先常驻启动 JOY 与 Guard；Mac 一次启动三服务
+SAFEEXEC_GUARD_URL=http://100.123.243.7:8788 ./scripts/start_stack.sh
 
-# 运行测试
-python tests/test_contracts.py
-python tests/test_policy.py
-python tests/test_lease.py
-python tests/test_guard.py
+# 打开控制台
+open http://127.0.0.1:8787
+
+# 测试
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 真实 Agent、Windows Guard 与 JOY 的部署和 A/B 演示步骤见
@@ -102,23 +97,25 @@ python tests/test_guard.py
 - `GET /v1/physical` - JOY 当前物理状态
 - `GET /healthz` - 健康检查
 
+### Orchestrator
+
+- `GET /v1/line/state`
+- `POST /v1/control/start|pause|resume|reset`
+- `POST /v1/testing/injections`
+- `GET /v1/events?after=<seq>`
+- `GET /v1/events/stream?after=<seq>`
+
 ### Dashboard
 
-- `GET /api/dashboard/v1` - 聚合 Runtime、Guard 与 JOY 的只读展示数据
-- `POST /api/dashboard/scenario` - 启动受保护演示；无保护基线默认禁用
-- 默认端口：Dashboard `8787`、Runtime `8790`、Guard `8788`
+- `GET /api/dashboard/v2`
+- `POST /api/control/start|pause|resume|reset`
+- `POST /api/testing/injections`
+- `GET /api/events/stream?after=<seq>`
 
 ## 测试
 
-```
-cd /opt/safeexec_new
-python tests/test_contracts.py   # 9 tests
-python tests/test_policy.py      # 7 tests
-python tests/test_lease.py       # 7 tests
-python tests/test_guard.py       # 10 tests
-```
-
-**总计: 33 tests, 全部通过**
+验收目标：完成 6、阻断 1、恢复 1、危险动作 0，A～F 全部位于
+`analyzer-01`。
 
 ## 开发
 

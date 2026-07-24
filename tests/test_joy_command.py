@@ -21,7 +21,7 @@ class JoyCommandTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             JoyCommand.from_mapping({**VALID_COMMAND, "raw_coordinates": [1, 2, 3]})
         with self.assertRaises(ValueError):
-            JoyCommand.from_mapping({**VALID_COMMAND, "sample_id": "sample-C"})
+            JoyCommand.from_mapping({**VALID_COMMAND, "sample_id": "sample-Z"})
         with self.assertRaises(ValueError):
             JoyCommand.from_mapping({**VALID_COMMAND, "destination": "outside"})
 

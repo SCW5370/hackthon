@@ -32,12 +32,12 @@ from joy.command import JoyCommand  # noqa: E402
 from joy.locations import (  # noqa: E402
     ARM_BASE_WORLD_Z,
     ARM_HOME,
-    DESTINATION_COORDS,
     PLATFORM_HOME_RELATIVE,
     PLATFORM_HOME_WORLD,
     REQUIRED_ENTITY_NAMES,
     RFID_TAGS,
     SAMPLE_STORAGE_COORDS,
+    SAMPLE_IDS,
 )
 from joy.state_machine import BioLabController, RobotAction  # noqa: E402
 
@@ -118,24 +118,24 @@ editor.select_map(SpawnableMaps.SmallWarehouse)
 _build_lanes()
 _build_stations()
 
-editor.spawn_static_mesh(
-    SpawnableMeshes.Cylinder,
-    unique_name="sample-A",
-    location=SAMPLE_STORAGE_COORDS["sample-A"],
-    scale=(0.22, 0.22, 0.45),
-    material=SpawnableMaterials.SimpleColor,
-    color=Colors.Blue,
-    rfid_tag=RFID_TAGS["sample-A"],
+sample_colors = (
+    Colors.Blue,
+    Colors.Yellow,
+    Colors.Green,
+    Colors.Firebrick,
+    Colors.Lightblue,
+    Colors.Gold,
 )
-editor.spawn_static_mesh(
-    SpawnableMeshes.Cylinder,
-    unique_name="sample-B",
-    location=SAMPLE_STORAGE_COORDS["sample-B"],
-    scale=(0.22, 0.22, 0.45),
-    material=SpawnableMaterials.SimpleColor,
-    color=Colors.Yellow,
-    rfid_tag=RFID_TAGS["sample-B"],
-)
+for sample_id, color in zip(SAMPLE_IDS, sample_colors):
+    editor.spawn_static_mesh(
+        SpawnableMeshes.Cylinder,
+        unique_name=sample_id,
+        location=SAMPLE_STORAGE_COORDS[sample_id],
+        scale=(0.18, 0.18, 0.38),
+        material=SpawnableMaterials.SimpleColor,
+        color=color,
+        rfid_tag=RFID_TAGS[sample_id],
+    )
 
 editor.spawn_entity(
     SpawnableEntities.MovablePlatform,
@@ -220,8 +220,8 @@ def _reset_runtime() -> dict[str, Any]:
         "safeexec_arm",
         (PLATFORM_HOME_WORLD[0], PLATFORM_HOME_WORLD[1], ARM_BASE_WORLD_Z),
     )
-    editor.set_location("sample-A", SAMPLE_STORAGE_COORDS["sample-A"])
-    editor.set_location("sample-B", SAMPLE_STORAGE_COORDS["sample-B"])
+    for sample_id in SAMPLE_IDS:
+        editor.set_location(sample_id, SAMPLE_STORAGE_COORDS[sample_id])
     arm.set_grabber_location(ARM_HOME)
     env.set_time_dilation(1.0)
     _set_status_color(Colors.Green)

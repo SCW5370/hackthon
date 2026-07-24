@@ -1,108 +1,70 @@
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from dev.dashboard_server import DashboardState
+from dev.dashboard_server import DashboardBackend, UpstreamError
 
 
 class DashboardServerTests(unittest.TestCase):
-    def test_snapshot_maps_real_runtime_denial_and_physical_state(self):
-        state = DashboardState(
+    def setUp(self) -> None:
+        self.backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
             runtime_url="http://runtime",
             guard_url="http://guard",
             legacy_url="http://legacy",
             legacy_token="",
             enable_unsafe_demo=False,
         )
-        request_id = "a-request"
-        state._run_id = request_id
-        state._fingerprint = "sha256:test"
+
+    def test_snapshot_combines_orchestrator_and_physical_evidence(self) -> None:
+        line = {
+            "line_state": "RUNNING",
+            "tasks": [{"task_id": "task-sample-A", "status": "COMPLETED"}],
+            "counters": {"completed_tasks": 1},
+        }
+        physical = {
+            "arm_state": "IDLE",
+            "sample_locations": {"sample-A": "analyzer-01"},
+            "unsafe_outcome": False,
+        }
 
         def response(url, **_kwargs):
-            if url == "http://runtime/v1/state":
-                return {
-                    "latest_action": {
-                        "status": "denied",
-                        "intent": {
-                            "request_id": request_id,
-                            "principal_id": "lab-agent-01",
-                            "action": "lab.sample.transfer",
-                            "resource": {"type": "lab.sample", "id": "sample-A"},
-                            "arguments": {
-                                "source": "cold-storage",
-                                "destination": "waste-bin",
-                            },
-                        },
-                        "decision": {
-                            "effect": "deny",
-                            "reason_code": "NO_MATCHING_GRANT",
-                        },
-                        "lease": None,
-                        "guard_response": None,
-                    }
-                }
-            if url == "http://runtime/v1/events":
-                return {
-                    "events": [
-                        {
-                            "timestamp": 1.0,
-                            "source": "runtime",
-                            "event": "policy.denied",
-                            "severity": "warning",
-                            "payload": {
-                                "request_id": request_id,
-                                "reason_code": "NO_MATCHING_GRANT",
-                            },
-                        }
-                    ]
-                }
-            if url == "http://guard/v1/events":
-                return {"events": []}
+            if url == "http://orchestrator/v1/line/state":
+                return line
             if url == "http://guard/v1/physical":
-                return {
-                    "status": "ok",
-                    "physical": {
-                        "arm_state": "IDLE",
-                        "platform_state": "IDLE",
-                        "current_dock": "home",
-                        "sample_locations": {"sample-A": "cold-storage"},
-                        "unsafe_outcome": False,
-                    },
-                }
+                return {"status": "ok", "physical": physical}
             raise AssertionError(url)
 
-        with patch("dev.dashboard_server._json_request", side_effect=response):
-            snapshot = state.snapshot()
+        with patch("dev.dashboard_server.json_request", side_effect=response):
+            value = self.backend.snapshot()
+        self.assertEqual(value["line"], line)
+        self.assertEqual(value["physical"], physical)
+        self.assertEqual(value["physical_status"], "live")
 
-        self.assertEqual(snapshot["result"]["state"], "blocked")
-        self.assertEqual(snapshot["runtime"]["effect"], "deny")
-        self.assertFalse(snapshot["lease"]["issued"])
-        self.assertFalse(snapshot["guard"]["reached"])
-        self.assertEqual(snapshot["physical"]["current_dock"], "home")
-        self.assertEqual(snapshot["timeline"][0]["status"], "blocked")
+    def test_busy_guard_uses_last_physical_evidence_without_polling(self) -> None:
+        self.backend._last_physical = {"arm_state": "MOVING"}
+        line = {
+            "line_state": "RUNNING",
+            "tasks": [{"task_id": "task-sample-A", "status": "EXECUTING"}],
+        }
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value=line,
+        ) as mocked:
+            value = self.backend.snapshot()
+        self.assertEqual(value["physical_status"], "cached")
+        self.assertEqual(value["physical"]["arm_state"], "MOVING")
+        self.assertEqual(mocked.call_count, 1)
 
-    def test_unavailable_guard_is_not_reported_as_safe(self):
-        state = DashboardState(
-            runtime_url="http://runtime",
-            guard_url="http://guard",
-            legacy_url="http://legacy",
-            legacy_token="",
-            enable_unsafe_demo=False,
-        )
+    def test_unsafe_baseline_is_disabled_by_default(self) -> None:
+        with self.assertRaises(UpstreamError) as raised:
+            self.backend.run_unsafe_baseline("")
+        self.assertEqual(raised.exception.status, 404)
 
-        def response(url, **_kwargs):
-            if url.endswith("/v1/state"):
-                return {"latest_action": None}
-            if url.endswith("/v1/events"):
-                return {"events": []}
-            if url.endswith("/v1/physical"):
-                return {"_connection_error": "offline"}
-            raise AssertionError(url)
-
-        with patch("dev.dashboard_server._json_request", side_effect=response):
-            snapshot = state.snapshot()
-
-        self.assertIsNone(snapshot["physical"]["unsafe_outcome"])
-        self.assertEqual(snapshot["connectivity"]["guard"], "disconnected")
+    def test_untrusted_content_is_rendered_with_text_content_only(self) -> None:
+        source = Path("console/dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('ui[id].textContent', source)
+        self.assertNotIn("innerHTML", source)
 
 
 if __name__ == "__main__":

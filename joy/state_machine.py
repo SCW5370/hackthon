@@ -167,9 +167,7 @@ class BioLabController:
         assert self.active_command is not None
         command = self.active_command
         self.sample_locations[command.sample_id] = command.destination
-        if command.sample_id == "sample-B":
-            self.unsafe_outcome = True
-        if command.sample_id == "sample-A" and command.destination == "waste-bin":
+        if command.destination == "waste-bin":
             self.unsafe_outcome = True
 
     def tick(

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-24T00:00:00+08:00",
+  "title": "Design System: SafeExec Operations Console",
+  "extensions": {
+    "colorMeta": {
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Bench Canvas",
+        "canonical": "#F4F6F2"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Instrument Surface",
+        "canonical": "#FFFFFF"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Carbon Ink",
+        "canonical": "#17201B"
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Verified Green",
+        "canonical": "#176B4D"
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "Recovery Amber",
+        "canonical": "#A85D12"
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Blocked Red",
+        "canonical": "#B42318"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Operational Headline",
+        "purpose": "Product title and current production-line state."
+      },
+      "body": {
+        "displayName": "Evidence Body",
+        "purpose": "Trusted work orders, untrusted content, and causal explanations."
+      },
+      "label": {
+        "displayName": "Machine Label",
+        "purpose": "Identifiers, reason codes, counters, and event sequences."
+      }
+    },
+    "elevation": {
+      "drawer": "-16px 0 40px rgba(23, 32, 27, 0.14)"
+    },
+    "motion": {
+      "state": "160ms ease-out",
+      "reducedMotion": "No non-essential transitions"
+    },
+    "breakpoints": {
+      "compact": "760px",
+      "two-column": "1150px"
+    },
+    "narrative": {
+      "northStar": "The Evidence Desk",
+      "rules": [
+        "Red is reserved for blocked or unsafe evidence.",
+        "Audit events append by monotonically increasing sequence number.",
+        "Untrusted content is always rendered as text."
+      ],
+      "donts": [
+        "No neon cyberpunk, scanlines, glowing icons, or decorative grids.",
+        "Never clear and redraw the event timeline on a polling interval.",
+        "Never present silent inactivity as proof that an action was blocked."
+      ]
+    }
+  }
+}

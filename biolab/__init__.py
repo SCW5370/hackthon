@@ -1,0 +1,1 @@
+"""Shared BioLab domain catalog."""

@@ -9,17 +9,19 @@ import time
 import uuid
 from typing import Any, Mapping
 
+from biolab.catalog import (
+    LINE_ID,
+    LINE_RESOURCE_TYPE,
+    LOCATION_NAMES,
+    RESET_ACTION,
+    SAMPLE_IDS,
+    SAMPLE_RESOURCE_TYPE,
+    TRANSFER_ACTION,
+)
 
 SCHEMA_VERSION = "safeexec.action.v1"
-ACTION = "lab.sample.transfer"
-RESOURCE_TYPE = "lab.sample"
-SAMPLE_IDS = ("sample-A", "sample-B")
-LOCATION_NAMES = (
-    "cold-storage",
-    "analyzer-01",
-    "waste-bin",
-    "quarantine-zone",
-)
+ACTION = TRANSFER_ACTION
+RESOURCE_TYPE = SAMPLE_RESOURCE_TYPE
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -91,6 +93,27 @@ def build_action_intent(
     return value
 
 
+def build_reset_intent(
+    *,
+    principal_id: str = "lab-agent-01",
+    request_id: str | None = None,
+    issued_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Build the only privileged production-line control action in V2."""
+
+    value = {
+        "schema_version": SCHEMA_VERSION,
+        "request_id": request_id or str(uuid.uuid4()),
+        "principal_id": principal_id,
+        "issued_at_ms": issued_at_ms or int(time.time() * 1000),
+        "action": RESET_ACTION,
+        "resource": {"type": LINE_RESOURCE_TYPE, "id": LINE_ID},
+        "arguments": {"command": "reset"},
+    }
+    validate_action_intent(value)
+    return value
+
+
 def validate_action_intent(value: Mapping[str, Any]) -> None:
     expected = {
         "schema_version",
@@ -122,26 +145,33 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
         value["issued_at_ms"], int
     ):
         raise ValueError("issued_at_ms must be an integer")
-    if value["action"] != ACTION:
+    if value["action"] not in {ACTION, RESET_ACTION}:
         raise ValueError(f"unsupported action: {value['action']!r}")
 
     resource = value["resource"]
     if not isinstance(resource, Mapping) or set(resource) != {"type", "id"}:
         raise ValueError("resource must contain exactly type and id")
-    if resource["type"] != RESOURCE_TYPE:
-        raise ValueError("unsupported resource type")
-
     arguments = value["arguments"]
-    if not isinstance(arguments, Mapping) or set(arguments) != {
-        "source",
-        "destination",
-    }:
-        raise ValueError("arguments must contain exactly source and destination")
-    ActionPlan(
-        sample_id=str(resource["id"]),
-        source=str(arguments["source"]),
-        destination=str(arguments["destination"]),
-    )
+    if value["action"] == ACTION:
+        if resource["type"] != RESOURCE_TYPE:
+            raise ValueError("unsupported resource type")
+        if not isinstance(arguments, Mapping) or set(arguments) != {
+            "source",
+            "destination",
+        }:
+            raise ValueError("arguments must contain exactly source and destination")
+        ActionPlan(
+            sample_id=str(resource["id"]),
+            source=str(arguments["source"]),
+            destination=str(arguments["destination"]),
+        )
+    else:
+        if dict(resource) != {"type": LINE_RESOURCE_TYPE, "id": LINE_ID}:
+            raise ValueError("unsupported reset resource")
+        if not isinstance(arguments, Mapping) or dict(arguments) != {
+            "command": "reset"
+        }:
+            raise ValueError("unsupported reset arguments")
 
 
 def plan_to_dict(plan: ActionPlan) -> dict[str, str]:

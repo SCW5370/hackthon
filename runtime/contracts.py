@@ -13,6 +13,15 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 from enum import Enum
 
+from biolab.catalog import (
+    LINE_ID,
+    LINE_RESOURCE_TYPE,
+    LOCATION_NAMES,
+    RESET_ACTION,
+    SAMPLE_IDS,
+    SAMPLE_RESOURCE_TYPE,
+    TRANSFER_ACTION,
+)
 
 # ============================================================
 # 枚举类
@@ -34,9 +43,10 @@ class SchemaVersion(str, Enum):
 # ActionIntent - Agent → Runtime
 # ============================================================
 
-ALLOWED_ACTION = "lab.sample.transfer"
-ALLOWED_RESOURCE_IDS = {"sample-A", "sample-B"}
-ALLOWED_POSITIONS = {"cold-storage", "analyzer-01", "waste-bin", "quarantine-zone"}
+ALLOWED_ACTION = TRANSFER_ACTION
+ALLOWED_ACTIONS = {TRANSFER_ACTION, RESET_ACTION}
+ALLOWED_RESOURCE_IDS = set(SAMPLE_IDS)
+ALLOWED_POSITIONS = set(LOCATION_NAMES)
 
 
 @dataclass(frozen=True)
@@ -72,22 +82,37 @@ class ActionIntent:
             raise ValueError(f"Invalid schema_version: {data['schema_version']}")
 
         # 验证 action
-        if data["action"] != ALLOWED_ACTION:
+        if data["action"] not in ALLOWED_ACTIONS:
             raise ValueError(f"Invalid action: {data['action']}")
 
-        # 验证 resource
+        # 验证 resource/arguments according to the action. This is deliberately
+        # exact so a signed reset cannot be confused with a sample transfer.
         resource = data["resource"]
-        if resource.get("type") != "lab.sample":
-            raise ValueError(f"Invalid resource type: {resource.get('type')}")
-        if resource.get("id") not in ALLOWED_RESOURCE_IDS:
-            raise ValueError(f"Invalid resource id: {resource.get('id')}")
-
-        # 验证 arguments
         args = data["arguments"]
-        if args.get("source") not in ALLOWED_POSITIONS:
-            raise ValueError(f"Invalid source: {args.get('source')}")
-        if args.get("destination") not in ALLOWED_POSITIONS:
-            raise ValueError(f"Invalid destination: {args.get('destination')}")
+        if not isinstance(resource, dict) or set(resource) != {"type", "id"}:
+            raise ValueError("resource must contain exactly type and id")
+        if not isinstance(args, dict):
+            raise ValueError("arguments must be an object")
+        if data["action"] == TRANSFER_ACTION:
+            if resource.get("type") != SAMPLE_RESOURCE_TYPE:
+                raise ValueError(f"Invalid resource type: {resource.get('type')}")
+            if resource.get("id") not in ALLOWED_RESOURCE_IDS:
+                raise ValueError(f"Invalid resource id: {resource.get('id')}")
+            if set(args) != {"source", "destination"}:
+                raise ValueError(
+                    "transfer arguments must contain exactly source and destination"
+                )
+            if args.get("source") not in ALLOWED_POSITIONS:
+                raise ValueError(f"Invalid source: {args.get('source')}")
+            if args.get("destination") not in ALLOWED_POSITIONS:
+                raise ValueError(f"Invalid destination: {args.get('destination')}")
+            if args["source"] == args["destination"]:
+                raise ValueError("source and destination must differ")
+        else:
+            if resource != {"type": LINE_RESOURCE_TYPE, "id": LINE_ID}:
+                raise ValueError("Invalid reset resource")
+            if args != {"command": "reset"}:
+                raise ValueError("reset arguments must equal {'command': 'reset'}")
 
         # 验证 request_id 是 UUID
         try:

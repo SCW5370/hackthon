@@ -21,6 +21,7 @@ class FakeDriver:
     def __init__(self) -> None:
         self.transfers: list[tuple[str, str, str, str]] = []
         self.location = "cold-storage"
+        self.reset_count = 0
 
     def transfer(
         self,
@@ -37,9 +38,16 @@ class FakeDriver:
     def health(self) -> dict[str, object]:
         return {
             "arm_state": "IDLE",
+            "active_command": None,
+            "queue_depth": 0,
             "sample_locations": {"sample-A": self.location},
             "unsafe_outcome": self.location == "waste-bin",
         }
+
+    def reset(self) -> dict[str, object]:
+        self.reset_count += 1
+        self.location = "cold-storage"
+        return self.health()
 
 
 class JoySafeExecAdapterTests(unittest.TestCase):
@@ -92,6 +100,20 @@ class JoySafeExecAdapterTests(unittest.TestCase):
         }
         receipt = executor.execute(intent)
         self.assertTrue(receipt["result"]["unsafe_outcome"])
+
+    def test_signed_line_reset_maps_to_joy_reset_only_while_idle(self) -> None:
+        driver = FakeDriver()
+        executor = JoyExecutor(driver, now_ms=lambda: 1784800001000)  # type: ignore[arg-type]
+        intent = {
+            **VALID_INTENT,
+            "action": "lab.line.reset",
+            "resource": {"type": "lab.line", "id": "biolab-line-01"},
+            "arguments": {"command": "reset"},
+        }
+        receipt = executor.execute(intent)
+        self.assertEqual(receipt["state"], "succeeded")
+        self.assertTrue(receipt["result"]["reset"])
+        self.assertEqual(driver.reset_count, 1)
 
 
 if __name__ == "__main__":

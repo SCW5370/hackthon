@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from .driver import JoyDriver
 from .locations import LOCATION_NAMES, SAMPLE_IDS
+from biolab.catalog import LINE_ID, RESET_ACTION, TRANSFER_ACTION
 
 
 ACTION_SCHEMA = "safeexec.action.v1"
@@ -44,8 +45,8 @@ def action_intent_to_joy(value: Mapping[str, Any]) -> dict[str, str]:
         value["issued_at_ms"], int
     ):
         raise ValueError("issued_at_ms must be an integer")
-    if value["action"] != "lab.sample.transfer":
-        raise ValueError("only lab.sample.transfer is supported")
+    if value["action"] != TRANSFER_ACTION:
+        raise ValueError("only lab.sample.transfer maps to a JOY transfer")
 
     resource = value["resource"]
     if not isinstance(resource, Mapping) or set(resource) != {"type", "id"}:
@@ -98,6 +99,8 @@ class JoyExecutor:
     def execute(self, intent: Mapping[str, Any]) -> dict[str, Any]:
         execution_id = str(uuid.uuid4())
         started_at_ms = self._now_ms()
+        if intent.get("action") == RESET_ACTION:
+            return self._execute_reset(intent, execution_id, started_at_ms)
         try:
             command = action_intent_to_joy(intent)
         except (TypeError, ValueError) as exc:
@@ -155,6 +158,55 @@ class JoyExecutor:
             "result": {
                 "sample_id": command["sample_id"],
                 "location": command["destination"],
+                "unsafe_outcome": bool(final.get("unsafe_outcome", False)),
+            },
+            "error_code": None,
+            "error": None,
+        }
+
+    def _execute_reset(
+        self,
+        intent: Mapping[str, Any],
+        execution_id: str,
+        started_at_ms: int,
+    ) -> dict[str, Any]:
+        expected_resource = {"type": "lab.line", "id": LINE_ID}
+        if (
+            intent.get("resource") != expected_resource
+            or intent.get("arguments") != {"command": "reset"}
+        ):
+            return self._failed(
+                execution_id,
+                str(intent.get("request_id", "")),
+                started_at_ms,
+                "INVALID_INTENT",
+                "invalid lab.line.reset payload",
+            )
+        try:
+            final = self.driver.health()
+            if final.get("active_command") or final.get("queue_depth", 0):
+                raise RuntimeError("line reset is allowed only while JOY is idle")
+            final = self.driver.reset()
+        except Exception as exc:
+            return self._failed(
+                execution_id,
+                str(intent.get("request_id", "")),
+                started_at_ms,
+                "EXECUTION_FAILED",
+                str(exc),
+            )
+        return {
+            "schema_version": EXECUTION_SCHEMA,
+            "execution_id": execution_id,
+            "request_id": str(intent.get("request_id", "")),
+            "executor_id": self.executor_id,
+            "state": "succeeded",
+            "started_at_ms": started_at_ms,
+            "finished_at_ms": self._now_ms(),
+            "result": {
+                "line_id": LINE_ID,
+                "reset": True,
+                "sample_locations": final.get("sample_locations", {}),
                 "unsafe_outcome": bool(final.get("unsafe_outcome", False)),
             },
             "error_code": None,
