@@ -1,0 +1,255 @@
+- generic [active] [ref=f2e1]:
+  - banner [ref=f2e2]:
+    - generic [ref=f2e3]:
+      - paragraph [ref=f2e4]: ROBOT ACTION FIREWALL
+      - heading "危险仓储态势感知 — 危险仓储 A 区" [level=1] [ref=f2e5]
+    - generic [ref=f2e6]:
+      - generic [ref=f2e7]: 态势评分
+      - strong [ref=f2e8]: "20"
+    - generic [ref=f2e9]:
+      - generic [ref=f2e10]: 系统状态
+      - strong [ref=f2e11]: SAFE_HOLD
+    - generic [ref=f2e12]:
+      - generic [ref=f2e13]: 在线机器人
+      - strong [ref=f2e14]: —
+    - generic [ref=f2e15]:
+      - generic [ref=f2e16]: 活跃告警
+      - strong [ref=f2e17]: "3"
+  - main [ref=f2e18]:
+    - generic [ref=f2e19]:
+      - generic [ref=f2e20]:
+        - generic [ref=f2e21]: 态势评分
+        - strong [ref=f2e22]: "20"
+      - generic [ref=f2e23]:
+        - generic [ref=f2e24]: 严重告警
+        - strong [ref=f2e25]: "2"
+      - generic [ref=f2e26]:
+        - generic [ref=f2e27]: 警告
+        - strong [ref=f2e28]: "1"
+      - generic [ref=f2e29]:
+        - generic [ref=f2e30]: 机器人总数
+        - strong [ref=f2e31]: "3"
+      - generic [ref=f2e32]:
+        - generic [ref=f2e33]: 有效 Lease
+        - strong [ref=f2e34]: "0"
+      - generic [ref=f2e35]:
+        - generic [ref=f2e36]: 待处理提案
+        - strong [ref=f2e37]: "1"
+    - generic [ref=f2e38]:
+      - complementary [ref=f2e39]:
+        - generic [ref=f2e40]:
+          - generic [ref=f2e41]:
+            - generic [ref=f2e42]:
+              - generic [ref=f2e43]: A1
+              - heading "Multi-Agent 控制台" [level=2] [ref=f2e44]
+            - generic [ref=f2e45]: "5"
+          - generic [ref=f2e46]:
+            - generic [ref=f2e47]:
+              - generic [ref=f2e48]:
+                - generic [ref=f2e49]: Safety Supervisor
+                - generic [ref=f2e50]: ACK
+                - time [ref=f2e51]: 13:36:28
+              - generic [ref=f2e52]: 系统重置，安全状态就绪
+            - generic [ref=f2e53]:
+              - generic [ref=f2e54]:
+                - generic [ref=f2e55]: Factory Agent
+                - generic [ref=f2e56]: PROPOSE
+                - time [ref=f2e57]: 13:36:37
+              - generic [ref=f2e58]: 申请执行 叉车举升（叉车-07）
+            - generic [ref=f2e59]:
+              - generic [ref=f2e60]:
+                - generic [ref=f2e61]: Safety Supervisor
+                - generic [ref=f2e62]: REQUEST
+                - time [ref=f2e63]: 13:36:37
+              - generic [ref=f2e64]: 向 SafeExec Runtime 申请授权：叉车举升
+            - generic [ref=f2e65]:
+              - generic [ref=f2e66]:
+                - generic [ref=f2e67]: SafeExec Runtime
+                - generic [ref=f2e68]: DENY
+                - time [ref=f2e69]: 13:36:37
+              - generic [ref=f2e70]: DENY — action forklift-raise not allowed in 化学品冷藏区
+            - generic [ref=f2e71]:
+              - generic [ref=f2e72]:
+                - generic [ref=f2e73]: Safety Supervisor
+                - generic [ref=f2e74]: REPLAN
+                - time [ref=f2e75]: 13:36:37
+              - generic [ref=f2e76]: REPLAN — 拒绝执行 叉车举升，保持停止等待区域安全
+        - generic [ref=f2e77]:
+          - generic [ref=f2e79]:
+            - generic [ref=f2e80]: A2
+            - heading "动作工作流" [level=2] [ref=f2e81]
+          - generic [ref=f2e83]:
+            - generic [ref=f2e84]:
+              - generic [ref=f2e85]: P002
+              - generic [ref=f2e86]: DENIED
+            - generic [ref=f2e87]:
+              - generic [ref=f2e88]: 叉车举升
+              - generic [ref=f2e89]: forklift-07
+            - generic [ref=f2e90]: ✗ action forklift-raise not allowed in 化学品冷藏区
+      - generic [ref=f2e91]:
+        - generic [ref=f2e92]:
+          - generic [ref=f2e93]:
+            - generic [ref=f2e94]:
+              - generic [ref=f2e95]: D1
+              - heading "红蓝双产线 Digital Twin" [level=2] [ref=f2e96]
+            - generic [ref=f2e97]:
+              - generic [ref=f2e98]: ● 红色 Baseline
+              - generic [ref=f2e99]: ● 蓝色 SafeExec
+          - generic [ref=f2e100]:
+            - generic [ref=f2e101]:
+              - generic [ref=f2e102]: 红色 Baseline（直接执行）
+              - img [ref=f2e103]:
+                - generic [ref=f2e105]:
+                  - generic [ref=f2e106]: 普通通道 A
+                  - generic [ref=f2e108]: 重型货架区
+                  - generic [ref=f2e110]: 化学品冷藏区
+                  - generic [ref=f2e112]: 高压设备区
+                  - generic [ref=f2e114]: 人机协作装卸区
+                  - generic [ref=f2e116]: 消防通道
+                - generic [ref=f2e118]:
+                  - generic [ref=f2e119] [cursor=pointer]: 叉车-07
+                  - generic [ref=f2e121] [cursor=pointer]: AGV-03
+                  - generic [ref=f2e123] [cursor=pointer]: 机械臂-09
+              - generic [ref=f2e125]: 红色产线：执行中（危险！）
+            - generic [ref=f2e127]:
+              - generic [ref=f2e128]: 蓝色 SafeExec（Lease 拦截）
+              - img [ref=f2e129]:
+                - generic [ref=f2e131]:
+                  - generic [ref=f2e132]: 普通通道 A
+                  - generic [ref=f2e134]: 重型货架区
+                  - generic [ref=f2e136]: 化学品冷藏区
+                  - generic [ref=f2e138]: 高压设备区
+                  - generic [ref=f2e140]: 人机协作装卸区
+                  - generic [ref=f2e142]: 消防通道
+                - generic [ref=f2e144]:
+                  - generic [ref=f2e145] [cursor=pointer]: 叉车-07
+                  - generic [ref=f2e147] [cursor=pointer]: AGV-03
+                  - generic [ref=f2e149] [cursor=pointer]: 机械臂-09
+              - generic [ref=f2e151]: SafeExec：已拦截 ✓
+        - generic [ref=f2e152]:
+          - generic [ref=f2e153]:
+            - generic [ref=f2e155]:
+              - generic [ref=f2e156]: D2
+              - heading "因果链" [level=2] [ref=f2e157]
+            - generic [ref=f2e158]:
+              - 'generic "Fact: zone.clear / camera" [ref=f2e159]': Fact
+              - generic [ref=f2e160]: →
+              - 'generic "Policy: zone rules" [ref=f2e161]': Policy
+              - generic [ref=f2e162]: →
+              - 'generic "State: SAFE_HOLD" [ref=f2e163]': State
+              - generic [ref=f2e164]: →
+              - 'generic "Lease: 无" [ref=f2e165]': Lease
+              - generic [ref=f2e166]: →
+              - 'generic "Gateway: BLOCKED" [ref=f2e167]': Gateway
+              - generic [ref=f2e168]: →
+              - 'generic "Action: STOPPED" [ref=f2e169]': Action
+          - generic [ref=f2e170]:
+            - generic [ref=f2e172]:
+              - generic [ref=f2e173]: D3
+              - heading "事件时间线" [level=2] [ref=f2e174]
+            - list [ref=f2e175]:
+              - listitem [ref=f2e176]:
+                - time [ref=f2e177]: 13:36:48
+                - generic [ref=f2e178]: 监控区域 检测到入侵/障碍物
+              - listitem [ref=f2e179]:
+                - time [ref=f2e180]: 13:36:48
+                - generic [ref=f2e181]: 自动指令 emergency_stop → forklift-07
+              - listitem [ref=f2e182]:
+                - time [ref=f2e183]: 13:36:48
+                - generic [ref=f2e184]: 叉车-07 在 化学品冷藏区 执行禁止动作 叉车举升
+              - listitem [ref=f2e185]:
+                - time [ref=f2e186]: 13:36:48
+                - generic [ref=f2e187]: "租约撤销: 叉车-07 在 化学品冷藏区 超速 (0.4 m/s / 限 0.3 m/s)"
+              - listitem [ref=f2e188]:
+                - time [ref=f2e189]: 13:36:48
+                - generic [ref=f2e190]: 自动指令 force_slow_down → forklift-07
+              - listitem [ref=f2e191]:
+                - time [ref=f2e192]: 13:36:48
+                - generic [ref=f2e193]: 叉车-07 在 化学品冷藏区 超速 (0.4 m/s / 限 0.3 m/s)
+              - listitem [ref=f2e194]:
+                - time [ref=f2e195]: 13:36:37
+                - generic [ref=f2e196]: "[REPLAN] Safety Supervisor: REPLAN — 拒绝执行 叉车举升，保持停止等待区域安全"
+              - listitem [ref=f2e197]:
+                - time [ref=f2e198]: 13:36:37
+                - generic [ref=f2e199]: "[DENY] SafeExec Runtime: DENY — action forklift-raise not allowed in 化学品冷藏区"
+              - listitem [ref=f2e200]:
+                - time [ref=f2e201]: 13:36:37
+                - generic [ref=f2e202]: "[REQUEST] Safety Supervisor: 向 SafeExec Runtime 申请授权：叉车举升"
+              - listitem [ref=f2e203]:
+                - time [ref=f2e204]: 13:36:37
+                - generic [ref=f2e205]: "[PROPOSE] Factory Agent: 申请执行 叉车举升（叉车-07）"
+      - complementary [ref=f2e206]:
+        - generic [ref=f2e207]:
+          - generic [ref=f2e208]:
+            - generic [ref=f2e209]:
+              - generic [ref=f2e210]: R1
+              - heading "Lease 状态" [level=2] [ref=f2e211]
+            - generic [ref=f2e212]: "0"
+          - generic [ref=f2e213]: 无有效租约
+        - generic [ref=f2e215]:
+          - generic [ref=f2e216]:
+            - generic [ref=f2e217]:
+              - generic [ref=f2e218]: R2
+              - heading "实时告警" [level=2] [ref=f2e219]
+            - generic [ref=f2e220]: "3"
+          - table [ref=f2e222]:
+            - rowgroup [ref=f2e223]:
+              - row [ref=f2e224]:
+                - columnheader "时间" [ref=f2e225]
+                - columnheader "等级" [ref=f2e226]
+                - columnheader "描述" [ref=f2e227]
+                - columnheader "操作" [ref=f2e228]
+            - rowgroup [ref=f2e229]:
+              - row [ref=f2e230]:
+                - cell "13:36:45" [ref=f2e231]
+                - cell "critical" [ref=f2e232]
+                - cell "区域不安全 —" [ref=f2e234]: 区域不安全—
+                - cell [ref=f2e235]:
+                  - button "确认" [ref=f2e236] [cursor=pointer]
+              - row [ref=f2e237]:
+                - cell "13:36:40" [ref=f2e238]
+                - cell "critical" [ref=f2e239]
+                - cell "未授权动作 化学品冷藏区" [ref=f2e241]: 未授权动作化学品冷藏区
+                - cell [ref=f2e242]:
+                  - button "确认" [ref=f2e243] [cursor=pointer]
+              - row [ref=f2e244]:
+                - cell "13:36:37" [ref=f2e245]
+                - cell "warning" [ref=f2e246]
+                - cell "区域超速 化学品冷藏区" [ref=f2e248]: 区域超速化学品冷藏区
+                - cell [ref=f2e249]:
+                  - button "确认" [ref=f2e250] [cursor=pointer]
+        - generic [ref=f2e251]:
+          - generic [ref=f2e253]:
+            - generic [ref=f2e254]: R3
+            - heading "操作员控制" [level=2] [ref=f2e255]
+          - generic [ref=f2e256]:
+            - button "🛑 紧急停止" [ref=f2e257] [cursor=pointer]
+            - button "🔄 要求重新规划" [ref=f2e258] [cursor=pointer]
+            - button "↺ 系统复位" [ref=f2e259] [cursor=pointer]
+          - paragraph [ref=f2e261]: 等待操作员指令...
+    - generic [ref=f2e262]:
+      - generic [ref=f2e263]:
+        - generic [ref=f2e264]: ☢
+        - generic [ref=f2e265]: CrashLab 攻击注入实验室
+        - generic [ref=f2e266]: 选择攻击场景，观察红蓝产线对比
+      - generic [ref=f2e267]:
+        - button "✅ 正常作业" [ref=f2e268] [cursor=pointer]
+        - button "🚨 越权动作（化学品区）" [ref=f2e269] [cursor=pointer]
+        - button "⚠️ 叉车超载" [ref=f2e270] [cursor=pointer]
+        - button "🏃 人机区超速" [ref=f2e271] [cursor=pointer]
+        - button "⚡ 机械臂滞留高压区" [ref=f2e272] [cursor=pointer]
+        - button "🚫 消防通道占用" [ref=f2e273] [cursor=pointer]
+        - button "📷 摄像头丢失" [ref=f2e274] [cursor=pointer]
+        - button "🔶 系统降级" [ref=f2e275] [cursor=pointer]
+        - button "↺ 复位系统" [ref=f2e276] [cursor=pointer]
+  - generic [ref=f2e278]:
+    - generic [ref=f2e279]: 🚨
+    - heading "🚨 未授权动作" [level=2] [ref=f2e280]
+    - paragraph [ref=f2e281]: 紧急播报，叉车零七在化学品冷藏区执行禁止的举升动作，请立即介入处置。
+    - generic [ref=f2e282]:
+      - strong [ref=f2e283]: 🤖 AI 安全建议
+      - paragraph [ref=f2e284]: 立即远程锁定叉车-07并下达撤离指令，通知现场人员疏散至安全区域。
+    - generic [ref=f2e285]:
+      - generic [ref=f2e286]: forklift-07
+      - generic [ref=f2e287]: 13:36:40
+    - button "确认并采取措施" [ref=f2e288]

@@ -1,0 +1,92 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - paragraph [ref=f1e4]: ROBOT ACTION FIREWALL
+      - heading "危险仓储态势感知 — 危险仓储 A 区" [level=1] [ref=f1e5]
+    - generic [ref=f1e6]:
+      - generic [ref=f1e7]: 态势评分
+      - strong [ref=f1e8]: —
+    - generic [ref=f1e9]:
+      - generic [ref=f1e10]: 在线机器人
+      - strong [ref=f1e11]: —
+    - generic [ref=f1e12]:
+      - generic [ref=f1e13]: 活跃告警
+      - strong [ref=f1e14]: —
+  - main [ref=f1e15]:
+    - generic [ref=f1e16]:
+      - generic [ref=f1e17]:
+        - generic [ref=f1e18]:
+          - generic [ref=f1e19]:
+            - generic [ref=f1e20]: "01"
+            - heading "仓储风险地图" [level=2] [ref=f1e21]
+          - generic [ref=f1e22]: SAFE
+        - generic [ref=f1e23]:
+          - img [ref=f1e24]:
+            - generic [ref=f1e26]:
+              - generic [ref=f1e27]: 普通通道 A
+              - generic [ref=f1e29]: 重型货架区
+              - generic [ref=f1e31]: 化学品冷藏区
+              - generic [ref=f1e33]: 高压设备区
+              - generic [ref=f1e35]: 人机协作装卸区
+              - generic [ref=f1e37]: 消防通道
+          - generic [ref=f1e39]:
+            - generic [ref=f1e40]: 安全区
+            - generic [ref=f1e42]: 注意区
+            - generic [ref=f1e44]: 高风险区
+            - generic [ref=f1e46]: 禁区
+            - generic [ref=f1e48]: 机器人
+            - generic [ref=f1e50]: 人员
+      - generic [ref=f1e52]:
+        - generic [ref=f1e54]:
+          - generic [ref=f1e55]: "02"
+          - heading "事件时间线" [level=2] [ref=f1e56]
+        - list [ref=f1e57]
+    - generic [ref=f1e58]:
+      - generic [ref=f1e59]:
+        - generic [ref=f1e60]:
+          - generic [ref=f1e61]:
+            - generic [ref=f1e62]: "03"
+            - heading "实时告警" [level=2] [ref=f1e63]
+          - generic [ref=f1e64]: "0"
+        - generic [ref=f1e65]: 暂无告警
+      - generic [ref=f1e67]:
+        - generic [ref=f1e69]:
+          - generic [ref=f1e70]: "04"
+          - heading "操作员干预" [level=2] [ref=f1e71]
+        - generic [ref=f1e72]:
+          - button "🛑 紧急停止" [ref=f1e73] [cursor=pointer]
+          - button "✓ 确认告警" [ref=f1e74] [cursor=pointer]
+          - button "↺ 系统复位" [ref=f1e75] [cursor=pointer]
+        - paragraph [ref=f1e77]: 等待操作员指令...
+    - generic [ref=f1e78]:
+      - generic [ref=f1e81]:
+        - generic [ref=f1e82]: "05"
+        - heading "机器人状态" [level=2] [ref=f1e83]
+      - generic [ref=f1e87]:
+        - generic [ref=f1e88]: "06"
+        - heading "安全事实" [level=2] [ref=f1e89]
+      - generic [ref=f1e91]:
+        - generic [ref=f1e92]:
+          - generic [ref=f1e93]:
+            - generic [ref=f1e94]: "07"
+            - heading "场景模拟" [level=2] [ref=f1e95]
+          - generic [ref=f1e96]: MOCK LAB
+        - generic [ref=f1e97]:
+          - button "✅ 正常作业" [ref=f1e98] [cursor=pointer]
+          - button "🚨 叉车闯化学品区" [ref=f1e99] [cursor=pointer]
+          - button "⚠️ 叉车超载" [ref=f1e100] [cursor=pointer]
+          - button "🏃 AGV 协作区超速" [ref=f1e101] [cursor=pointer]
+          - button "⚡ 机械臂滞留高压区" [ref=f1e102] [cursor=pointer]
+          - button "🚫 消防通道占用" [ref=f1e103] [cursor=pointer]
+          - button "📷 摄像头丢失" [ref=f1e104] [cursor=pointer]
+          - button "🔶 系统降级" [ref=f1e105] [cursor=pointer]
+          - button "↺ 复位系统" [ref=f1e106] [cursor=pointer]
+  - generic:
+    - generic:
+      - generic: 🚨
+      - heading "高危行为 detected" [level=2]
+      - paragraph: —
+      - generic:
+        - generic: —
+        - generic: —
+      - button "确认并采取措施"

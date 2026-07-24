@@ -1,0 +1,159 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - paragraph [ref=e4]: ROBOT ACTION FIREWALL
+      - heading "危险仓储态势感知 — 危险仓储 A 区" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7]: 态势评分
+      - strong [ref=e8]: —
+    - generic [ref=e9]:
+      - generic [ref=e10]: 系统状态
+      - strong [ref=e11]: —
+    - generic [ref=e12]:
+      - generic [ref=e13]: 在线机器人
+      - strong [ref=e14]: —
+    - generic [ref=e15]:
+      - generic [ref=e16]: 活跃告警
+      - strong [ref=e17]: —
+  - main [ref=e18]:
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: 态势评分
+        - strong [ref=e22]: —
+      - generic [ref=e23]:
+        - generic [ref=e24]: 严重告警
+        - strong [ref=e25]: —
+      - generic [ref=e26]:
+        - generic [ref=e27]: 警告
+        - strong [ref=e28]: —
+      - generic [ref=e29]:
+        - generic [ref=e30]: 机器人总数
+        - strong [ref=e31]: —
+      - generic [ref=e32]:
+        - generic [ref=e33]: 有效 Lease
+        - strong [ref=e34]: "0"
+      - generic [ref=e35]:
+        - generic [ref=e36]: 待处理提案
+        - strong [ref=e37]: "0"
+    - generic [ref=e38]:
+      - complementary [ref=e39]:
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e43]: A1
+            - heading "Multi-Agent 控制台" [level=2] [ref=e44]
+          - generic [ref=e45]: "0"
+        - generic [ref=e49]:
+          - generic [ref=e50]: A2
+          - heading "动作工作流" [level=2] [ref=e51]
+      - generic [ref=e53]:
+        - generic [ref=e54]:
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - generic [ref=e57]: D1
+              - heading "红蓝双产线 Digital Twin" [level=2] [ref=e58]
+            - generic [ref=e59]:
+              - generic [ref=e60]: ● 红色 Baseline
+              - generic [ref=e61]: ● 蓝色 SafeExec
+          - generic [ref=e62]:
+            - generic [ref=e63]:
+              - generic [ref=e64]: 红色 Baseline（直接执行）
+              - img [ref=e65]:
+                - generic [ref=e67]:
+                  - generic [ref=e68]: 普通通道 A
+                  - generic [ref=e70]: 重型货架区
+                  - generic [ref=e72]: 化学品冷藏区
+                  - generic [ref=e74]: 高压设备区
+                  - generic [ref=e76]: 人机协作装卸区
+                  - generic [ref=e78]: 消防通道
+              - generic [ref=e80]: 运行中（无拦截）
+            - generic [ref=e82]:
+              - generic [ref=e83]: 蓝色 SafeExec（Lease 拦截）
+              - img [ref=e84]:
+                - generic [ref=e86]:
+                  - generic [ref=e87]: 普通通道 A
+                  - generic [ref=e89]: 重型货架区
+                  - generic [ref=e91]: 化学品冷藏区
+                  - generic [ref=e93]: 高压设备区
+                  - generic [ref=e95]: 人机协作装卸区
+                  - generic [ref=e97]: 消防通道
+              - generic [ref=e99]: 受保护
+        - generic [ref=e100]:
+          - generic [ref=e101]:
+            - generic [ref=e103]:
+              - generic [ref=e104]: D2
+              - heading "因果链" [level=2] [ref=e105]
+            - generic [ref=e106]:
+              - generic [ref=e107]: Fact
+              - generic [ref=e108]: →
+              - generic [ref=e109]: Policy
+              - generic [ref=e110]: →
+              - generic [ref=e111]: State
+              - generic [ref=e112]: →
+              - generic [ref=e113]: Lease
+              - generic [ref=e114]: →
+              - generic [ref=e115]: Gateway
+              - generic [ref=e116]: →
+              - generic [ref=e117]: Action
+          - generic [ref=e118]:
+            - generic [ref=e120]:
+              - generic [ref=e121]: D3
+              - heading "事件时间线" [level=2] [ref=e122]
+            - list [ref=e123]
+      - complementary [ref=e124]:
+        - generic [ref=e126]:
+          - generic [ref=e127]:
+            - generic [ref=e128]: R1
+            - heading "Lease 状态" [level=2] [ref=e129]
+          - generic [ref=e130]: "0"
+        - generic [ref=e132]:
+          - generic [ref=e133]:
+            - generic [ref=e134]:
+              - generic [ref=e135]: R2
+              - heading "实时告警" [level=2] [ref=e136]
+            - generic [ref=e137]: "0"
+          - table [ref=e139]:
+            - rowgroup [ref=e140]:
+              - row [ref=e141]:
+                - columnheader "时间" [ref=e142]
+                - columnheader "等级" [ref=e143]
+                - columnheader "描述" [ref=e144]
+                - columnheader "操作" [ref=e145]
+            - rowgroup [ref=e146]:
+              - row [ref=e147]:
+                - cell "暂无告警，系统运行正常" [ref=e148]
+        - generic [ref=e149]:
+          - generic [ref=e151]:
+            - generic [ref=e152]: R3
+            - heading "操作员控制" [level=2] [ref=e153]
+          - generic [ref=e154]:
+            - button "🛑 紧急停止" [ref=e155] [cursor=pointer]
+            - button "🔄 要求重新规划" [ref=e156] [cursor=pointer]
+            - button "↺ 系统复位" [ref=e157] [cursor=pointer]
+          - paragraph [ref=e159]: 等待操作员指令...
+    - generic [ref=e160]:
+      - generic [ref=e161]:
+        - generic [ref=e162]: ☢
+        - generic [ref=e163]: CrashLab 攻击注入实验室
+        - generic [ref=e164]: 选择攻击场景，观察红蓝产线对比
+      - generic [ref=e165]:
+        - button "✅ 正常作业" [ref=e166] [cursor=pointer]
+        - button "🚨 越权动作（化学品区）" [ref=e167] [cursor=pointer]
+        - button "⚠️ 叉车超载" [ref=e168] [cursor=pointer]
+        - button "🏃 人机区超速" [ref=e169] [cursor=pointer]
+        - button "⚡ 机械臂滞留高压区" [ref=e170] [cursor=pointer]
+        - button "🚫 消防通道占用" [ref=e171] [cursor=pointer]
+        - button "📷 摄像头丢失" [ref=e172] [cursor=pointer]
+        - button "🔶 系统降级" [ref=e173] [cursor=pointer]
+        - button "↺ 复位系统" [ref=e174] [cursor=pointer]
+  - generic:
+    - generic:
+      - generic: 🚨
+      - heading "高危行为 detected" [level=2]
+      - paragraph: —
+      - generic:
+        - strong: 🤖 AI 安全建议
+        - paragraph: —
+      - generic:
+        - generic: —
+        - generic: —
+      - button "确认并采取措施"

@@ -1,0 +1,201 @@
+- generic [ref=f5e1]:
+  - banner [ref=f5e2]:
+    - generic [ref=f5e3]:
+      - paragraph [ref=f5e4]: ROBOT ACTION FIREWALL
+      - heading "危险仓储态势感知 — 危险仓储 A 区" [level=1] [ref=f5e5]
+    - generic [ref=f5e6]:
+      - generic [ref=f5e7]: 态势评分
+      - strong [ref=f5e8]: "85"
+    - generic [ref=f5e9]:
+      - generic [ref=f5e10]: 系统状态
+      - strong [ref=f5e11]: READY
+    - generic [ref=f5e12]:
+      - generic [ref=f5e13]: 在线机器人
+      - strong [ref=f5e14]: "3"
+    - generic [ref=f5e15]:
+      - generic [ref=f5e16]: 活跃告警
+      - strong [ref=f5e17]: "0"
+  - main [ref=f5e18]:
+    - generic [ref=f5e19]:
+      - generic [ref=f5e20]:
+        - generic [ref=f5e21]: 态势评分
+        - strong [ref=f5e22]: "85"
+        - generic [ref=f5e177]: ↑ 0
+      - generic [ref=f5e23]:
+        - generic [ref=f5e24]: 严重告警
+        - strong [ref=f5e25]: "0"
+      - generic [ref=f5e26]:
+        - generic [ref=f5e27]: 警告
+        - strong [ref=f5e28]: "0"
+      - generic [ref=f5e29]:
+        - generic [ref=f5e30]: 机器人总数
+        - strong [ref=f5e31]: "3"
+      - generic [ref=f5e32]:
+        - generic [ref=f5e33]: 禁区侵入
+        - strong [ref=f5e34]: "0"
+      - generic [ref=f5e35]:
+        - generic [ref=f5e36]: 摄像头
+        - strong [ref=f5e37]: "TRUE"
+    - generic [ref=f5e38]:
+      - complementary [ref=f5e39]:
+        - generic [ref=f5e40]:
+          - generic [ref=f5e41]:
+            - generic [ref=f5e42]:
+              - generic [ref=f5e43]: "01"
+              - heading "机器人状态" [level=2] [ref=f5e44]
+            - generic [ref=f5e45]: 3/3 正常
+          - generic [ref=f5e46]:
+            - generic [ref=f5e527]:
+              - generic [ref=f5e528]:
+                - generic [ref=f5e529]: 叉车-07
+                - generic [ref=f5e530]: normal
+              - generic [ref=f5e531]:
+                - generic [ref=f5e532]:
+                  - text: "区域:"
+                  - strong [ref=f5e533]: 普通通道 A
+                - generic [ref=f5e534]:
+                  - text: "速度:"
+                  - strong [ref=f5e535]: 0m/s
+                - generic [ref=f5e536]:
+                  - text: "负载:"
+                  - strong [ref=f5e537]: 0/1000kg
+                - generic [ref=f5e538]:
+                  - text: "动作:"
+                  - strong [ref=f5e539]: 停止
+              - generic [ref=f5e540]: 无违规
+            - generic [ref=f5e541]:
+              - generic [ref=f5e542]:
+                - generic [ref=f5e543]: AGV-03
+                - generic [ref=f5e544]: normal
+              - generic [ref=f5e545]:
+                - generic [ref=f5e546]:
+                  - text: "区域:"
+                  - strong [ref=f5e547]: 人机协作装卸区
+                - generic [ref=f5e548]:
+                  - text: "速度:"
+                  - strong [ref=f5e549]: 0m/s
+                - generic [ref=f5e550]:
+                  - text: "负载:"
+                  - strong [ref=f5e551]: 0/500kg
+                - generic [ref=f5e552]:
+                  - text: "动作:"
+                  - strong [ref=f5e553]: 停止
+              - generic [ref=f5e554]: 无违规
+            - generic [ref=f5e555]:
+              - generic [ref=f5e556]:
+                - generic [ref=f5e557]: 机械臂-09
+                - generic [ref=f5e558]: normal
+              - generic [ref=f5e559]:
+                - generic [ref=f5e560]:
+                  - text: "区域:"
+                  - strong [ref=f5e561]: 重型货架区
+                - generic [ref=f5e562]:
+                  - text: "速度:"
+                  - strong [ref=f5e563]: 0m/s
+                - generic [ref=f5e564]:
+                  - text: "负载:"
+                  - strong [ref=f5e565]: 0/50kg
+                - generic [ref=f5e566]:
+                  - text: "动作:"
+                  - strong [ref=f5e567]: 停止
+              - generic [ref=f5e568]: 无违规
+        - generic [ref=f5e89]:
+          - generic [ref=f5e90]:
+            - generic [ref=f5e91]:
+              - generic [ref=f5e92]: "02"
+              - heading "仓储风险地图" [level=2] [ref=f5e93]
+            - generic [ref=f5e94]: READY
+          - generic [ref=f5e95]:
+            - img [ref=f5e96]:
+              - generic [ref=f5e98]:
+                - generic [ref=f5e99]: 普通通道 A
+                - generic [ref=f5e101]: 重型货架区
+                - generic [ref=f5e103]: 化学品冷藏区
+                - generic [ref=f5e105]: 高压设备区
+                - generic [ref=f5e107]: 人机协作装卸区
+                - generic [ref=f5e109]: 消防通道
+              - generic [ref=f5e111]:
+                - generic [ref=f5e570] [cursor=pointer]: 叉车-07
+                - generic [ref=f5e572] [cursor=pointer]: AGV-03
+                - generic [ref=f5e574] [cursor=pointer]: 机械臂-09
+            - generic [ref=f5e118]:
+              - generic [ref=f5e119]: 禁区
+              - generic [ref=f5e121]: 高风险
+              - generic [ref=f5e123]: 机器人
+      - generic [ref=f5e125]:
+        - generic [ref=f5e126]:
+          - generic [ref=f5e127]:
+            - generic [ref=f5e128]:
+              - generic [ref=f5e129]: "03"
+              - heading "实时告警" [level=2] [ref=f5e130]
+            - generic [ref=f5e131]: "0"
+          - table [ref=f5e133]:
+            - rowgroup [ref=f5e134]:
+              - row [ref=f5e135]:
+                - columnheader "时间" [ref=f5e136]
+                - columnheader "等级" [ref=f5e137]
+                - columnheader "类型" [ref=f5e138]
+                - columnheader "机器人" [ref=f5e139]
+                - columnheader "区域" [ref=f5e140]
+                - columnheader "描述" [ref=f5e141]
+            - rowgroup [ref=f5e142]:
+              - row [ref=f5e576]:
+                - cell "暂无告警，系统运行正常" [ref=f5e577]
+        - generic [ref=f5e145]:
+          - generic [ref=f5e146]:
+            - generic [ref=f5e148]:
+              - generic [ref=f5e149]: "04"
+              - heading "事件时间线" [level=2] [ref=f5e150]
+            - list [ref=f5e151]:
+              - listitem [ref=f5e472]:
+                - time [ref=f5e473]: 12:20:04
+                - generic [ref=f5e474]: command.ack_alert · 操作员确认告警
+              - listitem [ref=f5e302]:
+                - time [ref=f5e303]: 12:19:54
+                - generic [ref=f5e304]: violation.detected · 监控区域 检测到入侵/障碍物
+              - listitem [ref=f5e305]:
+                - time [ref=f5e306]: 12:19:54
+                - generic [ref=f5e307]: violation.detected · 叉车-07 在 化学品冷藏区 执行禁止动作 叉车举升
+              - listitem [ref=f5e308]:
+                - time [ref=f5e309]: 12:19:54
+                - generic [ref=f5e310]: "lease.revoked · 租约撤销: 叉车-07 在 化学品冷藏区 超速 (0.4 m/s / 限 0.3 m/s)"
+              - listitem [ref=f5e311]:
+                - time [ref=f5e312]: 12:19:54
+                - generic [ref=f5e313]: violation.detected · 叉车-07 在 化学品冷藏区 超速 (0.4 m/s / 限 0.3 m/s)
+              - listitem [ref=f5e314]:
+                - time [ref=f5e315]: 12:19:54
+                - generic [ref=f5e316]: fact.updated · zone.clear=FALSE
+              - listitem [ref=f5e152]:
+                - time [ref=f5e153]: 12:19:34
+                - generic [ref=f5e154]: "state.changed · 系统状态: READY"
+          - generic [ref=f5e155]:
+            - generic [ref=f5e157]:
+              - generic [ref=f5e158]: "05"
+              - heading "操作员干预" [level=2] [ref=f5e159]
+            - generic [ref=f5e160]:
+              - button "🛑 紧急停止" [ref=f5e161] [cursor=pointer]
+              - button "✓ 确认告警" [ref=f5e162] [cursor=pointer]
+              - button "↺ 系统复位" [ref=f5e163] [cursor=pointer]
+            - generic [ref=f5e164]:
+              - paragraph [ref=f5e475]: "[12:20:04] 已执行: ack_alert"
+              - paragraph [ref=f5e165]: 等待操作员指令...
+    - generic [ref=f5e166]:
+      - generic [ref=f5e167]: "场景模拟:"
+      - button "✅ 正常作业" [ref=f5e168] [cursor=pointer]
+      - button "🚨 叉车闯化学品区" [ref=f5e169] [cursor=pointer]
+      - button "⚠️ 叉车超载" [ref=f5e170] [cursor=pointer]
+      - button "🏃 AGV 协作区超速" [ref=f5e171] [cursor=pointer]
+      - button "⚡ 机械臂滞留高压区" [ref=f5e172] [cursor=pointer]
+      - button "🚫 消防通道占用" [ref=f5e173] [cursor=pointer]
+      - button "📷 摄像头丢失" [ref=f5e174] [cursor=pointer]
+      - button "🔶 系统降级" [ref=f5e175] [cursor=pointer]
+      - button "↺ 复位系统" [active] [ref=f5e176] [cursor=pointer]
+  - generic:
+    - generic:
+      - generic: 🚨
+      - heading "🚨 区域不安全" [level=2]
+      - paragraph: 监控区域 检测到入侵/障碍物
+      - generic:
+        - generic: 系统级告警
+        - generic: 12:19:54
+      - button "确认并采取措施"

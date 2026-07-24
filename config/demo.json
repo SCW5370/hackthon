@@ -1,0 +1,130 @@
+{
+  "camera": {
+    "frame_timeout_ms": 1000,
+    "black_brightness_threshold": 12.0,
+    "low_entropy_threshold": 1.5,
+    "frozen_frame_count": 15
+  },
+  "danger_zone": [
+    [0.55, 0.45],
+    [0.95, 0.45],
+    [0.95, 0.95],
+    [0.55, 0.95]
+  ],
+  "vision": {
+    "enter_frames": 2,
+    "clear_after_ms": 500,
+    "detection_timeout_ms": 1000,
+    "minimum_confidence": 0.5
+  },
+  "warehouse": {
+    "name": "危险仓储 A 区",
+    "zones": [
+      {
+        "id": "passage-a",
+        "name": "普通通道 A",
+        "type": "normal",
+        "risk_level": "low",
+        "polygon": [[0.0, 0.0], [0.4, 0.0], [0.4, 1.0], [0.0, 1.0]],
+        "rules": {"speed_limit": 1.5, "forbidden": false}
+      },
+      {
+        "id": "heavy-rack",
+        "name": "重型货架区",
+        "type": "heavy",
+        "risk_level": "medium",
+        "polygon": [[0.4, 0.0], [0.7, 0.0], [0.7, 0.45], [0.4, 0.45]],
+        "rules": {"speed_limit": 0.8, "height_limit": 2.0, "forbidden": false}
+      },
+      {
+        "id": "chemical-cold",
+        "name": "化学品冷藏区",
+        "type": "chemical",
+        "risk_level": "critical",
+        "polygon": [[0.7, 0.0], [1.0, 0.0], [1.0, 0.45], [0.7, 0.45]],
+        "rules": {
+          "speed_limit": 0.3,
+          "forbidden": false,
+          "allowed_actions": ["move", "stop"],
+          "required_ppe": ["gas_sensor"],
+          "max_stay_ms": 15000
+        }
+      },
+      {
+        "id": "high-voltage",
+        "name": "高压设备区",
+        "type": "high_voltage",
+        "risk_level": "critical",
+        "polygon": [[0.4, 0.55], [0.75, 0.55], [0.75, 1.0], [0.4, 1.0]],
+        "rules": {
+          "speed_limit": 0.5,
+          "forbidden": false,
+          "min_person_distance": 1.0,
+          "max_stay_ms": 10000
+        }
+      },
+      {
+        "id": "collab-zone",
+        "name": "人机协作装卸区",
+        "type": "collab",
+        "risk_level": "high",
+        "polygon": [[0.0, 0.55], [0.4, 0.55], [0.4, 1.0], [0.0, 1.0]],
+        "rules": {
+          "speed_limit": 0.5,
+          "forbidden": false,
+          "require_person_slowdown": true
+        }
+      },
+      {
+        "id": "fire-lane",
+        "name": "消防通道",
+        "type": "fire_lane",
+        "risk_level": "critical",
+        "polygon": [[0.75, 0.55], [1.0, 0.55], [1.0, 1.0], [0.75, 1.0]],
+        "rules": {"forbidden": true}
+      }
+    ],
+    "robots": [
+      {
+        "id": "forklift-07",
+        "name": "叉车-07",
+        "type": "forklift",
+        "max_payload_kg": 1000,
+        "max_height_m": 3.0,
+        "safe_speed_mps": 1.0,
+        "color": "#ff3b30"
+      },
+      {
+        "id": "agv-03",
+        "name": "AGV-03",
+        "type": "agv",
+        "max_payload_kg": 500,
+        "max_height_m": 1.5,
+        "safe_speed_mps": 1.5,
+        "color": "#35e3a1"
+      },
+      {
+        "id": "arm-09",
+        "name": "机械臂-09",
+        "type": "arm",
+        "max_payload_kg": 50,
+        "max_height_m": 2.0,
+        "safe_speed_mps": 0.3,
+        "color": "#49a8ff"
+      }
+    ],
+    "actions": {
+      "blacklist_global": [],
+      "labels": {
+        "move": "行驶",
+        "stop": "停止",
+        "forklift-raise": "叉车举升",
+        "forklift-lower": "叉车下降",
+        "arm-extend": "机械臂伸展",
+        "arm-lift": "机械臂举起",
+        "load": "装载货物",
+        "unload": "卸载货物"
+      }
+    }
+  }
+}

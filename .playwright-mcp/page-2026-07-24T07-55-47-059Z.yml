@@ -1,0 +1,214 @@
+- generic [active] [ref=f7e1]:
+  - banner [ref=f7e2]:
+    - generic [ref=f7e3]:
+      - paragraph [ref=f7e4]: ROBOT ACTION FIREWALL
+      - heading "危险仓储态势感知 —" [level=1] [ref=f7e5]
+    - generic [ref=f7e6]:
+      - generic [ref=f7e7]: 态势评分
+      - strong [ref=f7e8]: —
+    - generic [ref=f7e9]:
+      - generic [ref=f7e10]: 系统状态
+      - strong [ref=f7e11]: —
+    - generic [ref=f7e12]:
+      - generic [ref=f7e13]: 在线机器人
+      - strong [ref=f7e14]: —
+    - generic [ref=f7e15]:
+      - generic [ref=f7e16]: 活跃告警
+      - strong [ref=f7e17]: —
+  - main [ref=f7e18]:
+    - generic [ref=f7e19]:
+      - generic [ref=f7e20]:
+        - generic [ref=f7e21]: 态势评分
+        - strong [ref=f7e22]: —
+      - generic [ref=f7e23]:
+        - generic [ref=f7e24]: 严重告警
+        - strong [ref=f7e25]: —
+      - generic [ref=f7e26]:
+        - generic [ref=f7e27]: 警告
+        - strong [ref=f7e28]: —
+      - generic [ref=f7e29]:
+        - generic [ref=f7e30]: 机器人总数
+        - strong [ref=f7e31]: —
+      - generic [ref=f7e32]:
+        - generic [ref=f7e33]: 有效 Lease
+        - strong [ref=f7e34]: "0"
+      - generic [ref=f7e35]:
+        - generic [ref=f7e36]: V1 Proposals
+        - strong [ref=f7e37]: "0"
+      - generic [ref=f7e38]:
+        - generic [ref=f7e39]: 系统状态
+        - generic [ref=f7e40]:
+          - generic [ref=f7e41]: LCK
+          - generic [ref=f7e42]: ›
+          - generic [ref=f7e43]: RDY
+          - generic [ref=f7e44]: ›
+          - generic [ref=f7e45]: RUN
+          - generic [ref=f7e46]: ›
+          - generic [ref=f7e47]: DGD
+          - generic [ref=f7e48]: ›
+          - generic [ref=f7e49]: HOLD
+    - generic [ref=f7e50]:
+      - generic [ref=f7e51]:
+        - generic [ref=f7e52]: 💾
+        - generic [ref=f7e53]: 内存
+        - generic [ref=f7e56]: 42%
+      - generic [ref=f7e57]:
+        - generic [ref=f7e58]: ❤️
+        - generic [ref=f7e59]: 心跳
+        - generic [ref=f7e62]: OK
+      - generic [ref=f7e63]:
+        - generic [ref=f7e64]: 📡
+        - generic [ref=f7e65]: RPS
+        - generic [ref=f7e68]: 38/s
+      - generic [ref=f7e69]:
+        - generic [ref=f7e70]: ⏱
+        - generic [ref=f7e71]: P95延迟
+        - generic [ref=f7e74]: 12ms
+      - generic [ref=f7e75]:
+        - generic [ref=f7e76]: 🎥
+        - generic [ref=f7e77]: 摄像头
+        - generic [ref=f7e80]: 正常
+      - generic [ref=f7e81]:
+        - generic [ref=f7e82]: 🚪
+        - generic [ref=f7e83]: Gateway
+        - generic [ref=f7e84]: PASS
+    - generic [ref=f7e85]:
+      - complementary [ref=f7e86]:
+        - generic [ref=f7e88]:
+          - generic [ref=f7e89]:
+            - generic [ref=f7e90]: A1
+            - heading "Multi-Agent 控制台" [level=2] [ref=f7e91]
+          - generic [ref=f7e92]: "0"
+        - generic [ref=f7e96]:
+          - generic [ref=f7e97]: A2
+          - heading "动作工作流" [level=2] [ref=f7e98]
+      - generic [ref=f7e100]:
+        - generic [ref=f7e101]:
+          - generic [ref=f7e102]:
+            - generic [ref=f7e103]:
+              - generic [ref=f7e104]: D1
+              - heading "红蓝双产线 Digital Twin" [level=2] [ref=f7e105]
+            - generic [ref=f7e106]:
+              - generic [ref=f7e107]: ● 红色 Baseline
+              - generic [ref=f7e108]: ● 蓝色 SafeExec
+          - generic [ref=f7e109]:
+            - generic [ref=f7e110]:
+              - generic [ref=f7e111]: 红色 Baseline（直接执行）
+              - generic [ref=f7e114]: 运行中（无拦截）
+            - generic [ref=f7e116]:
+              - generic [ref=f7e117]: 蓝色 SafeExec（Lease 拦截）
+              - generic [ref=f7e120]: 受保护
+        - generic [ref=f7e121]:
+          - generic [ref=f7e122]:
+            - generic [ref=f7e124]:
+              - generic [ref=f7e125]: D2
+              - heading "因果链 Fact→Policy→State→Lease→Gateway→Action" [level=2] [ref=f7e126]
+            - generic [ref=f7e127]:
+              - generic [ref=f7e128]: Fact
+              - generic [ref=f7e129]: ›
+              - generic [ref=f7e130]: Policy
+              - generic [ref=f7e131]: ›
+              - generic [ref=f7e132]: State
+              - generic [ref=f7e133]: ›
+              - generic [ref=f7e134]: Lease
+              - generic [ref=f7e135]: ›
+              - generic [ref=f7e136]: Gateway
+              - generic [ref=f7e137]: ›
+              - generic [ref=f7e138]: Action
+          - generic [ref=f7e139]:
+            - generic [ref=f7e140]:
+              - generic [ref=f7e141]:
+                - generic [ref=f7e142]: D3
+                - heading "Event Ledger 审计日志" [level=2] [ref=f7e143]
+              - generic [ref=f7e144]: "0"
+            - table [ref=f7e146]:
+              - rowgroup [ref=f7e147]:
+                - row [ref=f7e148]:
+                  - columnheader "seq" [ref=f7e149]
+                  - columnheader "时间" [ref=f7e150]
+                  - columnheader "事件" [ref=f7e151]
+                  - columnheader "来源" [ref=f7e152]
+                  - columnheader "摘要" [ref=f7e153]
+              - rowgroup
+        - generic [ref=f7e154]:
+          - generic [ref=f7e156]:
+            - generic [ref=f7e157]:
+              - generic [ref=f7e158]: V1
+              - heading "Decision 决策" [level=2] [ref=f7e159]
+            - generic [ref=f7e160]: "0"
+          - generic [ref=f7e164]:
+            - generic [ref=f7e165]: V1
+            - heading "Lease v1 令牌" [level=2] [ref=f7e166]
+          - generic [ref=f7e168]:
+            - generic [ref=f7e169]:
+              - generic [ref=f7e170]:
+                - generic [ref=f7e171]: V1
+                - heading "Runtime Event Ledger" [level=2] [ref=f7e172]
+              - generic [ref=f7e173]: "0"
+            - table [ref=f7e175]:
+              - rowgroup [ref=f7e176]:
+                - row [ref=f7e177]:
+                  - columnheader "seq" [ref=f7e178]
+                  - columnheader "时间" [ref=f7e179]
+                  - columnheader "事件" [ref=f7e180]
+                  - columnheader "来源" [ref=f7e181]
+                  - columnheader "摘要" [ref=f7e182]
+              - rowgroup
+      - complementary [ref=f7e183]:
+        - generic [ref=f7e185]:
+          - generic [ref=f7e186]:
+            - generic [ref=f7e187]: R1
+            - heading "Lease 状态" [level=2] [ref=f7e188]
+          - generic [ref=f7e189]: "0"
+        - generic [ref=f7e191]:
+          - generic [ref=f7e192]:
+            - generic [ref=f7e193]:
+              - generic [ref=f7e194]: R2
+              - heading "实时告警" [level=2] [ref=f7e195]
+            - generic [ref=f7e196]: "0"
+          - table [ref=f7e198]:
+            - rowgroup [ref=f7e199]:
+              - row [ref=f7e200]:
+                - columnheader "时间" [ref=f7e201]
+                - columnheader "等级" [ref=f7e202]
+                - columnheader "描述" [ref=f7e203]
+                - columnheader "操作" [ref=f7e204]
+            - rowgroup [ref=f7e205]:
+              - row [ref=f7e206]:
+                - cell "暂无告警，系统运行正常" [ref=f7e207]
+        - generic [ref=f7e208]:
+          - generic [ref=f7e210]:
+            - generic [ref=f7e211]: R3
+            - heading "操作员控制" [level=2] [ref=f7e212]
+          - generic [ref=f7e213]:
+            - button "🛑 紧急停止" [ref=f7e214] [cursor=pointer]
+            - button "🔄 要求重新规划" [ref=f7e215] [cursor=pointer]
+            - button "↺ 系统复位" [ref=f7e216] [cursor=pointer]
+          - paragraph [ref=f7e218]: 等待操作员指令...
+    - generic [ref=f7e219]:
+      - generic [ref=f7e220]:
+        - generic [ref=f7e221]: ☢
+        - generic [ref=f7e222]: CrashLab 攻击注入实验室
+        - generic [ref=f7e223]: 选择攻击场景，观察红蓝产线对比
+      - generic [ref=f7e224]:
+        - button "✅ 正常作业" [ref=f7e225] [cursor=pointer]
+        - button "🚨 越权动作（化学品区）" [ref=f7e226] [cursor=pointer]
+        - button "⚠️ 叉车超载" [ref=f7e227] [cursor=pointer]
+        - button "🏃 人机区超速" [ref=f7e228] [cursor=pointer]
+        - button "⚡ 机械臂滞留高压区" [ref=f7e229] [cursor=pointer]
+        - button "🚫 消防通道占用" [ref=f7e230] [cursor=pointer]
+        - button "📷 摄像头丢失" [ref=f7e231] [cursor=pointer]
+        - button "🔶 系统降级" [ref=f7e232] [cursor=pointer]
+        - button "↺ 复位系统" [ref=f7e233] [cursor=pointer]
+  - generic:
+    - generic:
+      - generic: 🚨
+      - heading "高危行为 detected" [level=2]
+      - paragraph: —
+      - generic:
+        - strong: 🤖 AI 安全建议
+        - paragraph: —
+      - generic:
+        - generic: —
+        - generic: —
+      - button "确认并采取措施"
