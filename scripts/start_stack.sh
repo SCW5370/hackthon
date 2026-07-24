@@ -5,6 +5,8 @@ SAFEEXEC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="${SAFEEXEC_ROOT}/.run/v2"
 PYTHON_BIN="${SAFEEXEC_PYTHON:-${SAFEEXEC_ROOT}/.venv/bin/python}"
 PRIVATE_KEY="${SAFEEXEC_PRIVATE_KEY:-${SAFEEXEC_ROOT}/.run/private_key.txt}"
+WORK_ORDER_PRIVATE_KEY="${SAFEEXEC_WORK_ORDER_PRIVATE_KEY:-${SAFEEXEC_ROOT}/.run/work_order_private_key.txt}"
+WORK_ORDER_PUBLIC_KEY="${SAFEEXEC_WORK_ORDER_PUBLIC_KEY:-${SAFEEXEC_ROOT}/.run/work_order_public_key.txt}"
 GUARD_URL="${SAFEEXEC_GUARD_URL:-http://127.0.0.1:8788}"
 FACT_MODE="${SAFEEXEC_FACT_MODE:-demo}"
 AGENT_PROVIDER="${SAFEEXEC_AGENT_PROVIDER:-replay}"
@@ -19,6 +21,14 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 if [[ ! -f "${PRIVATE_KEY}" ]]; then
   echo "Runtime private key not found: ${PRIVATE_KEY}" >&2
+  exit 1
+fi
+if [[ ! -f "${WORK_ORDER_PRIVATE_KEY}" && ! -f "${WORK_ORDER_PUBLIC_KEY}" ]]; then
+  "${PYTHON_BIN}" "${SAFEEXEC_ROOT}/scripts/gen_keys.py" \
+    --private-key "${WORK_ORDER_PRIVATE_KEY}" \
+    --public-key "${WORK_ORDER_PUBLIC_KEY}"
+elif [[ ! -f "${WORK_ORDER_PRIVATE_KEY}" || ! -f "${WORK_ORDER_PUBLIC_KEY}" ]]; then
+  echo "WorkOrder signing keypair is incomplete in ${SAFEEXEC_ROOT}/.run" >&2
   exit 1
 fi
 if [[ "${AGENT_PROVIDER}" == "openai" && -z "${LLM_API_KEY:-}" ]]; then
@@ -53,6 +63,7 @@ start_service runtime \
   --port 8790 \
   --mission "${SAFEEXEC_ROOT}/config/mission.yaml" \
   --key "${PRIVATE_KEY}" \
+  --work-order-public-key "${WORK_ORDER_PUBLIC_KEY}" \
   --guard-url "${GUARD_URL}/v1/execute"
 
 ORCHESTRATOR_ARGS=(
@@ -63,6 +74,7 @@ ORCHESTRATOR_ARGS=(
   --legacy-url "${LEGACY_URL}" \
   --fact-mode "${FACT_MODE}" \
   --agent-provider "${AGENT_PROVIDER}" \
+  --require-trusted-work-order \
   --recovery-delay 1.5 \
   --enable-testing
 )
@@ -77,9 +89,11 @@ start_service dashboard \
   --port 8787 \
   --orchestrator-url http://127.0.0.1:8789 \
   --runtime-url http://127.0.0.1:8790 \
+  --work-order-key "${WORK_ORDER_PRIVATE_KEY}" \
   --guard-url "${GUARD_URL}"
 
 echo "Dashboard:    http://127.0.0.1:8787"
+echo "Configuration:http://127.0.0.1:8787/config"
 echo "Orchestrator: http://127.0.0.1:8789"
 echo "Runtime:      http://127.0.0.1:8790"
 echo "Guard:        ${GUARD_URL}"

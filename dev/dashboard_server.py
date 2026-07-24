@@ -19,13 +19,19 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
+from biolab.catalog import LOCATION_NAMES, SAMPLE_IDS
+from runtime.work_orders import WorkOrderIssuer
+
 ROOT = Path(__file__).resolve().parents[1]
 CONSOLE = ROOT / "console"
 STATIC_FILES = {
     "/": CONSOLE / "index.html",
     "/index.html": CONSOLE / "index.html",
+    "/config": CONSOLE / "config.html",
+    "/config.html": CONSOLE / "config.html",
     "/styles.css": CONSOLE / "styles.css",
     "/dashboard.js": CONSOLE / "dashboard.js",
+    "/config.js": CONSOLE / "config.js",
 }
 
 
@@ -77,10 +83,12 @@ class DashboardBackend:
         orchestrator_url: str,
         guard_url: str,
         runtime_url: str,
+        work_order_issuer: WorkOrderIssuer | None = None,
     ) -> None:
         self.orchestrator_url = orchestrator_url.rstrip("/")
         self.guard_url = guard_url.rstrip("/")
         self.runtime_url = runtime_url.rstrip("/")
+        self.work_order_issuer = work_order_issuer
         self._last_physical: dict[str, Any] | None = None
 
     def snapshot(self) -> dict[str, Any]:
@@ -184,6 +192,117 @@ class DashboardBackend:
             timeout=5,
         )
 
+    def configuration(self) -> dict[str, Any]:
+        runtime = json_request(f"{self.runtime_url}/v1/config", timeout=3)
+        orders = json_request(f"{self.runtime_url}/v1/work-orders", timeout=3)
+        line = json_request(f"{self.orchestrator_url}/v1/line/state", timeout=3)
+        issuer = None
+        if self.work_order_issuer is not None:
+            issuer = {
+                "issuer_id": self.work_order_issuer.issuer_id,
+                "key_id": self.work_order_issuer.key_id,
+                "status": "ready",
+            }
+        return {
+            "schema_version": "safeexec.control-plane.v1",
+            "runtime": runtime,
+            "work_orders": orders.get("work_orders", []),
+            "active_work_order_id": line.get("active_work_order_id"),
+            "line": line,
+            "issuer": issuer,
+        }
+
+    def issue_work_order(self, value: dict[str, Any]) -> dict[str, Any]:
+        if self.work_order_issuer is None:
+            raise UpstreamError(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "control-plane signing key is not configured",
+            )
+        required = {
+            "schema_version",
+            "sample_ids",
+            "source",
+            "destination",
+            "subject_principal_id",
+            "valid_for_ms",
+            "operator_note",
+        }
+        if set(value) != required:
+            raise ValueError(
+                "invalid WorkOrder draft fields; "
+                f"missing={sorted(required - set(value))}, "
+                f"extra={sorted(set(value) - required)}"
+            )
+        if value["schema_version"] != "safeexec.work-order-draft.v1":
+            raise ValueError("unsupported WorkOrder draft schema")
+        sample_ids = value["sample_ids"]
+        if (
+            not isinstance(sample_ids, list)
+            or not sample_ids
+            or len(sample_ids) != len(set(sample_ids))
+            or any(sample_id not in SAMPLE_IDS for sample_id in sample_ids)
+        ):
+            raise ValueError("sample_ids must be a unique non-empty sample list")
+        source = value["source"]
+        destination = value["destination"]
+        if source not in LOCATION_NAMES or destination not in LOCATION_NAMES:
+            raise ValueError("unknown WorkOrder route")
+        if source == destination:
+            raise ValueError("WorkOrder source and destination must differ")
+        principal = value["subject_principal_id"]
+        if not isinstance(principal, str) or not principal.strip():
+            raise ValueError("subject_principal_id must be non-empty")
+        valid_for_ms = value["valid_for_ms"]
+        if isinstance(valid_for_ms, bool) or not isinstance(valid_for_ms, int):
+            raise ValueError("valid_for_ms must be an integer")
+        note = value["operator_note"]
+        if not isinstance(note, str) or len(note) > 500:
+            raise ValueError("operator_note must contain at most 500 characters")
+
+        grants = [
+            {
+                "grant_id": f"work-order-{sample_id.lower()}-analysis",
+                "action": "lab.sample.transfer",
+                "resource": {"type": "lab.sample", "id": sample_id},
+                "arguments": {
+                    "source": source,
+                    "destination": destination,
+                },
+                "required_facts": [
+                    {
+                        "key": "camera.healthy",
+                        "equals": True,
+                        "max_age_ms": 1500,
+                    }
+                ],
+                "max_executions": 1,
+            }
+            for sample_id in sample_ids
+        ]
+        order = self.work_order_issuer.issue(
+            subject_principal_id=principal,
+            grants=grants,
+            valid_for_ms=valid_for_ms,
+            operator_note=note.strip(),
+        )
+        registered = json_request(
+            f"{self.runtime_url}/v1/work-orders",
+            method="POST",
+            payload=order.to_dict(),
+            timeout=5,
+        )
+        activated = json_request(
+            f"{self.orchestrator_url}/v1/work-orders/activate",
+            method="POST",
+            payload={"work_order_id": order.work_order_id},
+            timeout=5,
+        )
+        return {
+            "status": "issued-and-activated",
+            "work_order": registered.get("work_order"),
+            "line": activated.get("line"),
+        }
+
 
 class DashboardServer(ThreadingHTTPServer):
     backend: DashboardBackend
@@ -210,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"status": "ok"})
             elif parsed.path == "/api/dashboard/v2":
                 self._json(self.backend.snapshot())
+            elif parsed.path == "/api/config":
+                self._json(self.backend.configuration())
             elif parsed.path == "/api/events":
                 self._json(self.backend.events(self._after(parsed.query)))
             elif parsed.path == "/api/events/stream":
@@ -224,7 +345,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
-            if parsed.path.startswith("/api/control/"):
+            if parsed.path == "/api/control/mode":
+                value = self._body()
+                if set(value) != {"mode"} or not isinstance(value["mode"], str):
+                    raise ValueError("mode endpoint expects exactly one string field")
+                self._json(
+                    self.backend.set_execution_mode(
+                        value["mode"],
+                        self.headers.get("X-Unsafe-Demo-Token", "")
+                    )
+                )
+            elif parsed.path.startswith("/api/control/"):
                 self._require_empty(self._body())
                 action = parsed.path.rsplit("/", 1)[-1]
                 self._json(self.backend.control(action))
@@ -235,15 +366,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.backend.submit_operator_command(self._body()),
                     HTTPStatus.CREATED,
                 )
-            elif parsed.path == "/api/control/mode":
-                value = self._body()
-                if set(value) != {"mode"} or not isinstance(value["mode"], str):
-                    raise ValueError("mode endpoint expects exactly one string field")
+            elif parsed.path == "/api/work-orders":
                 self._json(
-                    self.backend.set_execution_mode(
-                        value["mode"],
-                        self.headers.get("X-Unsafe-Demo-Token", "")
-                    )
+                    self.backend.issue_work_order(self._body()),
+                    HTTPStatus.CREATED,
                 )
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
@@ -353,13 +479,32 @@ def main() -> None:
         "--guard-url",
         default=os.environ.get("SAFEEXEC_GUARD_URL", "http://127.0.0.1:8788"),
     )
+    parser.add_argument(
+        "--work-order-key",
+        default=os.environ.get("SAFEEXEC_WORK_ORDER_PRIVATE_KEY", ""),
+    )
+    parser.add_argument(
+        "--work-order-issuer-id",
+        default=os.environ.get(
+            "SAFEEXEC_WORK_ORDER_ISSUER_ID",
+            "biolab-control-plane",
+        ),
+    )
     args = parser.parse_args()
 
+    issuer = None
+    if args.work_order_key:
+        key_path = Path(args.work_order_key)
+        issuer = WorkOrderIssuer(
+            key_path.read_text(encoding="utf-8").strip(),
+            issuer_id=args.work_order_issuer_id,
+        )
     server = DashboardServer((args.host, args.port), Handler)
     server.backend = DashboardBackend(
         orchestrator_url=args.orchestrator_url,
         runtime_url=args.runtime_url,
         guard_url=args.guard_url,
+        work_order_issuer=issuer,
     )
     print(f"SafeExec Dashboard listening on http://{args.host}:{args.port}", flush=True)
     server.serve_forever()

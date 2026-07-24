@@ -26,6 +26,42 @@ class FakeRuntime:
         self.fact_count += 1
         return {"status": "ok"}
 
+    def get_work_order(self, work_order_id):
+        return {
+            "work_order": {
+                "work_order_id": work_order_id,
+                "issuer_id": "test-control-plane",
+                "subject_principal_id": "lab-agent-01",
+                "valid_until_ms": int(time.time() * 1000) + 60_000,
+                "operator_note": "trusted test order",
+                "verification": {
+                    "signature": "verified",
+                    "issuer_trusted": True,
+                    "within_organization_policy": True,
+                },
+                "grants": [
+                    {
+                        "grant_id": "order-a",
+                        "action": "lab.sample.transfer",
+                        "resource": {"type": "lab.sample", "id": "sample-A"},
+                        "arguments": {
+                            "source": "cold-storage",
+                            "destination": "analyzer-01",
+                        },
+                    },
+                    {
+                        "grant_id": "order-c",
+                        "action": "lab.sample.transfer",
+                        "resource": {"type": "lab.sample", "id": "sample-C"},
+                        "arguments": {
+                            "source": "cold-storage",
+                            "destination": "analyzer-01",
+                        },
+                    },
+                ],
+            }
+        }
+
     def submit_action(self, intent):
         self.actions.append(json.loads(json.dumps(intent)))
         if intent["action"] == "lab.line.reset":
@@ -179,6 +215,37 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(
             state["physical_evidence"]["sample_locations"],
             {sample_id: "analyzer-01" for sample_id in SAMPLE_IDS},
+        )
+
+    def test_verified_work_order_is_required_and_bound_to_every_intent(self) -> None:
+        runtime = FakeRuntime()
+        app = LineOrchestrator(
+            runtime,
+            recovery_delay=0,
+            require_trusted_work_order=True,
+        )
+        with self.assertRaises(ConflictError):
+            app.start()
+        work_order_id = str(uuid.uuid4())
+        activated = app.activate_work_order({"work_order_id": work_order_id})
+        self.assertEqual(activated["status"], "activated")
+        self.assertEqual(
+            activated["line"]["job_manifest"]["sample_ids"],
+            ["sample-A", "sample-C"],
+        )
+        app.start()
+        self.assertEqual(app.wait_until_terminal(), "COMPLETED")
+        transfer_actions = [
+            action for action in runtime.actions
+            if action["action"] == "lab.sample.transfer"
+        ]
+        self.assertEqual(len(transfer_actions), 2)
+        self.assertTrue(
+            all(
+                action["schema_version"] == "safeexec.action.v2"
+                and action["work_order_id"] == work_order_id
+                for action in transfer_actions
+            )
         )
 
     def test_unsafe_mode_is_explicitly_gated(self) -> None:

@@ -34,7 +34,9 @@ class Effect(str, Enum):
 
 class SchemaVersion(str, Enum):
     ACTION_V1 = "safeexec.action.v1"
+    ACTION_V2 = "safeexec.action.v2"
     MISSION_V1 = "safeexec.mission.v1"
+    WORK_ORDER_V1 = "safeexec.work-order.v1"
     LEASE_V1 = "safeexec.lease.v1"
     DECISION_V1 = "safeexec.decision.v1"
 
@@ -58,14 +60,22 @@ class ActionIntent:
     action: str
     resource: dict
     arguments: dict
+    work_order_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> ActionIntent:
         """从字典创建，字段不全或有未知字段都会失败"""
-        required_fields = {
+        base_fields = {
             "schema_version", "request_id", "principal_id",
             "issued_at_ms", "action", "resource", "arguments"
         }
+        schema_version = data.get("schema_version")
+        if schema_version == SchemaVersion.ACTION_V1.value:
+            required_fields = base_fields
+        elif schema_version == SchemaVersion.ACTION_V2.value:
+            required_fields = base_fields | {"work_order_id"}
+        else:
+            raise ValueError(f"Invalid schema_version: {schema_version}")
 
         # 检查未知字段
         unknown = set(data.keys()) - required_fields
@@ -77,9 +87,12 @@ class ActionIntent:
         if missing:
             raise ValueError(f"Missing fields: {', '.join(sorted(missing))}")
 
-        # 验证 schema_version
-        if data["schema_version"] != SchemaVersion.ACTION_V1.value:
-            raise ValueError(f"Invalid schema_version: {data['schema_version']}")
+        work_order_id = data.get("work_order_id")
+        if schema_version == SchemaVersion.ACTION_V2.value:
+            try:
+                uuid.UUID(str(work_order_id))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("work_order_id must be a UUID") from exc
 
         # 验证 action
         if data["action"] not in ALLOWED_ACTIONS:
@@ -134,10 +147,14 @@ class ActionIntent:
             action=data["action"],
             resource=resource,
             arguments=args,
+            work_order_id=work_order_id,
         )
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        value = asdict(self)
+        if self.schema_version == SchemaVersion.ACTION_V1.value:
+            value.pop("work_order_id", None)
+        return value
 
     def normalize(self) -> bytes:
         """
@@ -153,6 +170,8 @@ class ActionIntent:
             "resource": self.resource,
             "arguments": self.arguments,
         }
+        if self.schema_version == SchemaVersion.ACTION_V2.value:
+            d["work_order_id"] = self.work_order_id
         return json.dumps(d, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
     def compute_hash(self) -> str:
@@ -280,6 +299,12 @@ DENY_CODES = {
     "FACT_MISSING",
     "FACT_STALE",
     "FACT_MISMATCH",
+    "WORK_ORDER_REQUIRED",
+    "WORK_ORDER_NOT_FOUND",
+    "WORK_ORDER_EXPIRED",
+    "WORK_ORDER_PRINCIPAL_MISMATCH",
+    "WORK_ORDER_GRANT_MISMATCH",
+    "WORK_ORDER_GRANT_CONSUMED",
 }
 
 

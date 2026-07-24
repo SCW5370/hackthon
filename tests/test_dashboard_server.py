@@ -3,6 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from dev.dashboard_server import DashboardBackend, UpstreamError
+from runtime.lease_authority import LeaseAuthority
+from runtime.work_orders import WorkOrder, WorkOrderIssuer
 
 
 class DashboardServerTests(unittest.TestCase):
@@ -107,6 +109,55 @@ class DashboardServerTests(unittest.TestCase):
         source = Path("console/dashboard.js").read_text(encoding="utf-8")
         self.assertIn('ui[id].textContent', source)
         self.assertNotIn("innerHTML", source)
+
+    def test_trusted_configuration_is_a_separate_page(self) -> None:
+        dashboard = Path("console/index.html").read_text(encoding="utf-8")
+        config = Path("console/config.html").read_text(encoding="utf-8")
+        self.assertIn('href="/config"', dashboard)
+        self.assertNotIn('id="job-form"', dashboard)
+        self.assertIn('id="work-order-form"', config)
+        self.assertIn("签发可信工单", config)
+
+    def test_control_plane_signs_registers_and_activates_work_order(self) -> None:
+        private_key, _ = LeaseAuthority.generate_keypair()
+        backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
+            runtime_url="http://runtime",
+            guard_url="http://guard",
+            work_order_issuer=WorkOrderIssuer(private_key),
+        )
+        captured = {}
+
+        def response(url, **kwargs):
+            if url == "http://runtime/v1/work-orders":
+                captured["order"] = WorkOrder.from_dict(kwargs["payload"])
+                return {
+                    "status": "registered",
+                    "work_order": kwargs["payload"],
+                }
+            if url == "http://orchestrator/v1/work-orders/activate":
+                captured["activation"] = kwargs["payload"]
+                return {"status": "activated", "line": {"line_state": "STOPPED"}}
+            raise AssertionError(url)
+
+        with patch("dev.dashboard_server.json_request", side_effect=response):
+            result = backend.issue_work_order(
+                {
+                    "schema_version": "safeexec.work-order-draft.v1",
+                    "sample_ids": ["sample-A", "sample-C"],
+                    "source": "cold-storage",
+                    "destination": "analyzer-01",
+                    "subject_principal_id": "lab-agent-01",
+                    "valid_for_ms": 60_000,
+                    "operator_note": "test order",
+                }
+            )
+        self.assertEqual(result["status"], "issued-and-activated")
+        self.assertEqual(
+            captured["activation"]["work_order_id"],
+            captured["order"].work_order_id,
+        )
+        self.assertEqual(len(captured["order"].grants), 2)
 
 
 if __name__ == "__main__":

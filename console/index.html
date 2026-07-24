@@ -16,13 +16,20 @@
         <h1>SafeExec 自主实验室</h1>
       </div>
     </div>
+    <nav class="page-nav" aria-label="SafeExec 页面">
+      <a href="/" aria-current="page">运行监控</a>
+      <a href="/config">可信配置</a>
+    </nav>
     <div class="line-summary" aria-live="polite">
       <span class="state-dot" id="line-state-dot"></span>
       <div>
         <span class="micro-label">生产线状态</span>
         <strong id="line-state">连接中</strong>
       </div>
-      <span class="mono" id="active-task">—</span>
+      <div class="line-ids">
+        <span class="mono" id="active-task">—</span>
+        <span class="mono" id="runtime-path">SAFEEXEC</span>
+      </div>
     </div>
     <nav class="controls" aria-label="生产线控制">
       <button id="start-btn" class="primary">开始</button>
@@ -35,43 +42,14 @@
 
   <div class="notice" id="notice" role="status" hidden></div>
 
-  <section class="mode-bar" id="mode-bar" aria-labelledby="mode-title">
-    <div class="mode-copy">
-      <span class="mode-indicator" id="mode-indicator" aria-hidden="true"></span>
+  <section class="command-deck dashboard-command" aria-label="演示输入">
+    <div class="configuration-summary">
       <div>
-        <h2 id="mode-title">执行路径</h2>
-        <p id="mode-description">Agent 动作经过 Policy、Lease 与 Guard 后才可到达 JOY</p>
+        <h2>可信工单由控制面提供</h2>
+        <p id="compiled-job">尚未激活可信工单</p>
       </div>
+      <a class="button-link" href="/config">打开可信配置</a>
     </div>
-    <div class="mode-actions" role="group" aria-label="选择执行路径">
-      <button id="mode-protected-btn" class="mode-choice" aria-pressed="true">启用 SafeExec</button>
-      <button id="mode-unsafe-btn" class="mode-choice danger-choice" aria-pressed="false">不启用（对照）</button>
-      <label class="mode-token">
-        对照 Token
-        <input id="unsafe-token" type="password" autocomplete="off" placeholder="仅切换时使用">
-      </label>
-    </div>
-    <p class="mode-warning" id="mode-warning" hidden>
-      演示基线正在运行：动作将绕过 Runtime、Lease 与 Guard，恶意意图可直接到达机械臂。
-    </p>
-  </section>
-
-  <section class="command-deck" aria-label="Agent任务输入">
-    <form class="command-block trusted-command" id="job-form">
-      <div class="command-heading">
-        <div>
-          <h2>可信操作员目标</h2>
-          <p>自然语言通过 Function Calling 固化为不可变工单</p>
-        </div>
-        <span class="provider-chip" id="provider-chip">Replay Provider</span>
-      </div>
-      <div class="command-entry">
-        <textarea id="operator-command" rows="2" maxlength="1000">把距离机械臂最近的四个样品运送到分析区</textarea>
-        <button id="compile-btn" class="primary" type="submit">生成工单</button>
-      </div>
-      <p class="command-result" id="compiled-job">当前为默认六样品工单</p>
-    </form>
-
     <form class="command-block attack-command" id="attack-form">
       <div class="command-heading">
         <div>

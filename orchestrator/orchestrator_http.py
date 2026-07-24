@@ -90,6 +90,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.app.compile_operator_command(data),
                     HTTPStatus.CREATED,
                 )
+            elif parsed.path == "/v1/work-orders/activate":
+                self._json(
+                    self.app.activate_work_order(data),
+                    HTTPStatus.CREATED,
+                )
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
         except OrchestratorError as exc:
@@ -184,6 +189,7 @@ def main() -> None:
     parser.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", ""))
     parser.add_argument("--llm-model", default=os.getenv("LLM_MODEL", ""))
     parser.add_argument("--enable-unsafe-demo", action="store_true")
+    parser.add_argument("--require-trusted-work-order", action="store_true")
     args = parser.parse_args()
 
     job_compiler = (
@@ -222,6 +228,7 @@ def main() -> None:
         fact_mode=args.fact_mode,
         recovery_delay=args.recovery_delay,
         testing_enabled=args.enable_testing,
+        require_trusted_work_order=args.require_trusted_work_order,
     )
     print(f"SafeExec Orchestrator listening on {args.host}:{args.port}", flush=True)
     server.serve_forever()

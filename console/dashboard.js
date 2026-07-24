@@ -21,11 +21,8 @@ const ui = Object.fromEntries([
   "physical-source", "arm-state", "platform-state", "dock-state", "location-map",
   "physical-verdict", "metric-completed", "metric-blocked", "metric-recovered",
   "metric-unsafe", "recent-events-list", "scroll-toggle", "audit-drawer",
-  "audit-close", "audit-list", "scrim", "unsafe-token",
-  "job-form", "operator-command", "compile-btn", "compiled-job", "provider-chip",
+  "audit-close", "audit-list", "scrim", "compiled-job", "runtime-path",
   "attack-form", "injection-target", "injection-content", "job-caption",
-  "mode-bar", "mode-indicator", "mode-description", "mode-warning",
-  "mode-protected-btn", "mode-unsafe-btn",
 ].map(id => [id, document.getElementById(id)]));
 
 let snapshot = null;
@@ -72,8 +69,6 @@ function render() {
   for (const action of ["start", "pause", "resume", "reset"]) {
     ui[`${action}-btn`].disabled = !line.controls?.[action];
   }
-  ui["compile-btn"].disabled = !line.controls?.configure;
-  renderExecutionMode(line);
   renderJob(line);
   renderInjectionTargets(line);
   renderTasks(line);
@@ -82,33 +77,21 @@ function render() {
   renderMetrics(line.counters);
 }
 
-function renderExecutionMode(line) {
-  const unsafe = line.execution_mode === "unsafe-baseline";
-  const canChange = Boolean(line.controls?.mode);
-  const unsafeAvailable = Boolean(line.execution_modes?.["unsafe-baseline"]?.available);
-  ui["mode-bar"].classList.toggle("unsafe", unsafe);
-  ui["mode-indicator"].className = `mode-indicator ${unsafe ? "unsafe" : "protected"}`;
-  ui["mode-description"].textContent = unsafe
-    ? "Agent 动作绕过 Runtime、Lease 与 Guard，直接交给 Legacy Bridge"
-    : "Agent 动作经过 Policy、Lease 与 Guard 后才可到达 JOY";
-  ui["mode-warning"].hidden = !unsafe;
-  ui["mode-protected-btn"].setAttribute("aria-pressed", String(!unsafe));
-  ui["mode-unsafe-btn"].setAttribute("aria-pressed", String(unsafe));
-  ui["mode-protected-btn"].disabled = !canChange || !unsafe;
-  ui["mode-unsafe-btn"].disabled = !canChange || unsafe || !unsafeAvailable;
-  ui["unsafe-token"].disabled = !canChange || unsafe || !unsafeAvailable;
-}
-
 function renderJob(line) {
   const job = line.job_manifest || {};
   const count = Array.isArray(job.sample_ids) ? job.sample_ids.length : 0;
-  const provider = line.agent_provider?.job || job.provider;
-  setText("provider-chip", provider === "openai-compatible-function-calling"
-    ? "LLM Function Call" : "Replay Function Call");
-  setText("compiled-job", count
-    ? `已冻结：${job.sample_ids.join("、")}，目标为${LOCATION_LABELS[job.destination] || job.destination}`
-    : "尚未生成工单");
+  const active = line.active_work_order_id;
+  setText("runtime-path", line.execution_mode === "unsafe-baseline" ? "BYPASS" : "SAFEEXEC");
+  ui["runtime-path"].className = `mono runtime-path ${line.execution_mode === "unsafe-baseline" ? "unsafe" : ""}`;
+  setText("compiled-job", active && count
+    ? `已验证 ${shortId(active)}，授权 ${count} 件样品前往${LOCATION_LABELS[job.destination] || job.destination}`
+    : "尚未激活可信工单，请先前往配置页签发");
   setText("job-caption", job.operator_text || "等待工单");
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 16 ? `${text.slice(0, 8)}…${text.slice(-4)}` : text;
 }
 
 function renderInjectionTargets(line) {
@@ -358,37 +341,6 @@ async function control(action) {
   }
 }
 
-async function compileJob() {
-  const text = ui["operator-command"].value.trim();
-  if (!text) {
-    showNotice("请输入可信操作员目标", true);
-    return;
-  }
-  const body = {
-    schema_version: "safeexec.operator-command.v1",
-    command_id: crypto.randomUUID(),
-    text,
-    requested_by: "dashboard-operator",
-    submitted_at_ms: Date.now(),
-  };
-  ui["compile-btn"].disabled = true;
-  ui["compile-btn"].textContent = "规划中";
-  try {
-    const result = await request("/api/agent/commands", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    await loadSnapshot();
-    const count = result.job_manifest?.sample_ids?.length || 0;
-    showNotice(`Function Calling 已生成 ${count} 件样品的可信工单`);
-  } catch (error) {
-    showNotice(error.message, true);
-  } finally {
-    ui["compile-btn"].textContent = "生成工单";
-    ui["compile-btn"].disabled = !snapshot?.line?.controls?.configure;
-  }
-}
-
 async function injectAttack() {
   const targetTaskId = ui["injection-target"].value;
   const content = ui["injection-content"].value.trim();
@@ -426,40 +378,9 @@ function closeAudit() {
   ui["audit-btn"].focus();
 }
 
-async function setExecutionMode(mode) {
-  const unsafe = mode === "unsafe-baseline";
-  if (unsafe && !ui["unsafe-token"].value) {
-    showNotice("请输入对照演示 Token", true);
-    ui["unsafe-token"].focus();
-    return;
-  }
-  if (unsafe && !window.confirm(
-    "切换后，同一 Agent 的动作将绕过 SafeExec 并可能造成危险物理结果。确认仅用于隔离对照演示？"
-  )) return;
-  try {
-    await request("/api/control/mode", {
-      method: "POST",
-      body: JSON.stringify({mode}),
-      headers: {"X-Unsafe-Demo-Token": ui["unsafe-token"].value},
-    });
-    ui["unsafe-token"].value = "";
-    await loadSnapshot();
-    showNotice(
-      unsafe ? "已进入无保护对照模式" : "已恢复 SafeExec 保护模式",
-      unsafe,
-    );
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-}
-
 function bind() {
   ["start", "pause", "resume", "reset"].forEach(action => {
     ui[`${action}-btn`].addEventListener("click", () => control(action));
-  });
-  ui["job-form"].addEventListener("submit", event => {
-    event.preventDefault();
-    compileJob();
   });
   ui["attack-form"].addEventListener("submit", event => {
     event.preventDefault();
@@ -468,8 +389,6 @@ function bind() {
   ui["audit-btn"].addEventListener("click", openAudit);
   ui["audit-close"].addEventListener("click", closeAudit);
   ui.scrim.addEventListener("click", closeAudit);
-  ui["mode-protected-btn"].addEventListener("click", () => setExecutionMode("protected"));
-  ui["mode-unsafe-btn"].addEventListener("click", () => setExecutionMode("unsafe-baseline"));
   ui["scroll-toggle"].addEventListener("click", () => {
     scrollPaused = !scrollPaused;
     ui["scroll-toggle"].textContent = scrollPaused ? "继续滚动" : "暂停滚动";

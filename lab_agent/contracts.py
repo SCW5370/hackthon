@@ -20,6 +20,7 @@ from biolab.catalog import (
 )
 
 SCHEMA_VERSION = "safeexec.action.v1"
+SCHEMA_VERSION_V2 = "safeexec.action.v2"
 ACTION = TRANSFER_ACTION
 RESOURCE_TYPE = SAMPLE_RESOURCE_TYPE
 
@@ -74,11 +75,12 @@ def build_action_intent(
     plan: ActionPlan,
     *,
     principal_id: str = "lab-agent-01",
+    work_order_id: str | None = None,
     request_id: str | None = None,
     issued_at_ms: int | None = None,
 ) -> dict[str, Any]:
     value = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": SCHEMA_VERSION_V2 if work_order_id else SCHEMA_VERSION,
         "request_id": request_id or str(uuid.uuid4()),
         "principal_id": principal_id,
         "issued_at_ms": issued_at_ms or int(time.time() * 1000),
@@ -89,6 +91,8 @@ def build_action_intent(
             "destination": plan.destination,
         },
     }
+    if work_order_id:
+        value["work_order_id"] = work_order_id
     validate_action_intent(value)
     return value
 
@@ -115,7 +119,7 @@ def build_reset_intent(
 
 
 def validate_action_intent(value: Mapping[str, Any]) -> None:
-    expected = {
+    base = {
         "schema_version",
         "request_id",
         "principal_id",
@@ -124,6 +128,8 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
         "resource",
         "arguments",
     }
+    schema_version = value.get("schema_version")
+    expected = base | ({"work_order_id"} if schema_version == SCHEMA_VERSION_V2 else set())
     if set(value) != expected:
         raise ValueError(
             f"invalid ActionIntent fields; "
@@ -131,8 +137,13 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
             f"extra={sorted(set(value) - expected)}"
         )
 
-    if value["schema_version"] != SCHEMA_VERSION:
+    if schema_version not in {SCHEMA_VERSION, SCHEMA_VERSION_V2}:
         raise ValueError("unsupported schema_version")
+    if schema_version == SCHEMA_VERSION_V2:
+        try:
+            uuid.UUID(str(value["work_order_id"]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("work_order_id must be a UUID") from exc
     try:
         parsed_request_id = uuid.UUID(str(value["request_id"]))
     except (AttributeError, TypeError, ValueError) as exc:

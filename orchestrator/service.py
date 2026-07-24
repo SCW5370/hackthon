@@ -70,6 +70,8 @@ class RuntimeClient(Protocol):
 
     def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]: ...
 
+    def get_work_order(self, work_order_id: str) -> dict[str, Any]: ...
+
 
 class UnsafeExecutorClient(Protocol):
     def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]: ...
@@ -96,6 +98,24 @@ class HttpRuntimeClient:
 
     def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]:
         return self._request("/v1/actions", intent)
+
+    def get_work_order(self, work_order_id: str) -> dict[str, Any]:
+        request = Request(
+            f"{self.base_url}/v1/work-orders/{work_order_id}",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                value = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Runtime HTTP {exc.code}: {detail}") from exc
+        except (TimeoutError, URLError) as exc:
+            raise ConnectionError(f"Runtime unavailable: {exc}") from exc
+        if not isinstance(value, dict):
+            raise RuntimeError("Runtime returned a non-object response")
+        return value
 
     def _request(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         request = Request(
@@ -225,6 +245,7 @@ class LineOrchestrator:
         fact_mode: str = "demo",
         recovery_delay: float = 1.5,
         testing_enabled: bool = True,
+        require_trusted_work_order: bool = False,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         if fact_mode not in {"demo", "external"}:
@@ -239,6 +260,7 @@ class LineOrchestrator:
         self.fact_mode = fact_mode
         self.recovery_delay = recovery_delay
         self.testing_enabled = testing_enabled
+        self.require_trusted_work_order = require_trusted_work_order
         self._sleep = sleeper
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
@@ -255,6 +277,7 @@ class LineOrchestrator:
         self._counters: dict[str, int] = {}
         self._job_manifest: dict[str, Any] = {}
         self._physical_evidence: dict[str, Any] | None = None
+        self._active_work_order_id: str | None = None
         self._rebuild_line()
 
     def _rebuild_line(
@@ -286,12 +309,16 @@ class LineOrchestrator:
             },
             "created_at_ms": int(time.time() * 1000),
         }
+        task_source = str(self._job_manifest.get("source", "cold-storage"))
+        task_destination = str(
+            self._job_manifest.get("destination", "analyzer-01")
+        )
         self._tasks = [
             {
                 "task_id": f"task-{sample_id}",
                 "sample_id": sample_id,
-                "source": "cold-storage",
-                "destination": "analyzer-01",
+                "source": task_source,
+                "destination": task_destination,
                 "status": "QUEUED",
                 "attempt": 0,
                 "session_id": None,
@@ -347,6 +374,7 @@ class LineOrchestrator:
                     else None
                 ),
                 "job_manifest": json.loads(json.dumps(self._job_manifest)),
+                "active_work_order_id": self._active_work_order_id,
                 "tasks": json.loads(json.dumps(self._tasks)),
                 "counters": dict(self._counters),
                 "physical_evidence": json.loads(
@@ -375,7 +403,11 @@ class LineOrchestrator:
     def _controls(self) -> dict[str, bool]:
         state = self._line_state
         return {
-            "start": state == "STOPPED",
+            "start": state == "STOPPED"
+            and (
+                not self.require_trusted_work_order
+                or self._active_work_order_id is not None
+            ),
             "pause": state == "RUNNING",
             "resume": state == "PAUSED",
             "reset": state in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"},
@@ -420,6 +452,10 @@ class LineOrchestrator:
         with self._lock:
             if self._line_state != "STOPPED":
                 raise ConflictError(f"cannot start from {self._line_state}")
+            if self.require_trusted_work_order and self._active_work_order_id is None:
+                raise ConflictError(
+                    "no verified WorkOrder is active; create one in /config first"
+                )
             self._line_state = "RUNNING"
             self._emit(
                 "line.started",
@@ -466,7 +502,13 @@ class LineOrchestrator:
         self._assert_execution_succeeded(result, action="lab.line.reset")
         with self._lock:
             self._line_state = "STOPPED"
-            self._rebuild_line()
+            self._active_work_order_id = None
+            current_manifest = json.loads(json.dumps(self._job_manifest))
+            current_samples = tuple(current_manifest.get("sample_ids", SAMPLE_IDS))
+            self._rebuild_line(
+                current_samples,
+                job_manifest=current_manifest,
+            )
             self._record_physical_from_response(result, fallback_dock="home")
             self._emit(
                 "line.reset",
@@ -475,7 +517,102 @@ class LineOrchestrator:
             )
             return self.snapshot()
 
+    def activate_work_order(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, Mapping) or set(value) != {"work_order_id"}:
+            raise ValidationError(
+                "WorkOrder activation expects exactly work_order_id"
+            )
+        try:
+            work_order_id = str(uuid.UUID(str(value["work_order_id"])))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("work_order_id must be a UUID") from exc
+        with self._lock:
+            if self._line_state != "STOPPED":
+                raise ConflictError("WorkOrder can be activated only while stopped")
+            if any(task["status"] != "QUEUED" for task in self._tasks):
+                raise ConflictError("reset the line before activating a WorkOrder")
+
+        response = self.runtime.get_work_order(work_order_id)
+        order = response.get("work_order")
+        if not isinstance(order, dict):
+            raise ValidationError("Runtime did not return a verified WorkOrder")
+        verification = order.get("verification")
+        if not isinstance(verification, dict) or not all(
+            verification.get(key) is True
+            for key in (
+                "issuer_trusted",
+                "within_organization_policy",
+            )
+        ) or verification.get("signature") != "verified":
+            raise ValidationError("Runtime has not verified this WorkOrder")
+        if order.get("subject_principal_id") != "lab-agent-01":
+            raise ValidationError("WorkOrder subject is not the Lab Agent")
+
+        transfer_grants = [
+            grant
+            for grant in order.get("grants", [])
+            if isinstance(grant, dict)
+            and grant.get("action") == "lab.sample.transfer"
+        ]
+        if not transfer_grants:
+            raise ValidationError("WorkOrder contains no Lab transfer grants")
+        sample_ids = tuple(
+            str(grant.get("resource", {}).get("id"))
+            for grant in transfer_grants
+        )
+        if len(sample_ids) != len(set(sample_ids)) or any(
+            sample_id not in SAMPLE_IDS for sample_id in sample_ids
+        ):
+            raise ValidationError("WorkOrder sample grants are invalid or duplicated")
+        routes = {
+            (
+                grant.get("arguments", {}).get("source"),
+                grant.get("arguments", {}).get("destination"),
+            )
+            for grant in transfer_grants
+        }
+        if len(routes) != 1:
+            raise ValidationError("Lab demo requires one shared WorkOrder route")
+        source, destination = next(iter(routes))
+        manifest = {
+            "schema_version": "safeexec.job-manifest.v2",
+            "job_id": str(uuid.uuid4()),
+            "work_order_id": work_order_id,
+            "operator_text": order.get("operator_note") or "执行已签名可信工单",
+            "requested_by": order.get("issuer_id"),
+            "sample_ids": list(sample_ids),
+            "source": source,
+            "destination": destination,
+            "selection_strategy": "signed-work-order-order",
+            "provider": "safeexec-control-plane",
+            "tool_call": None,
+            "created_at_ms": int(time.time() * 1000),
+            "valid_until_ms": order.get("valid_until_ms"),
+        }
+        with self._lock:
+            self._active_work_order_id = work_order_id
+            self._rebuild_line(sample_ids, job_manifest=manifest)
+            self._emit(
+                "work_order.activated",
+                "orchestrator",
+                {
+                    "work_order_id": work_order_id,
+                    "issuer_id": order.get("issuer_id"),
+                    "sample_ids": list(sample_ids),
+                    "valid_until_ms": order.get("valid_until_ms"),
+                },
+            )
+            return {
+                "status": "activated",
+                "work_order": json.loads(json.dumps(order)),
+                "line": self.snapshot(),
+            }
+
     def compile_operator_command(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        if self.require_trusted_work_order:
+            raise ConflictError(
+                "natural language cannot create trusted authorization; use /config"
+            )
         command = self._validate_operator_command(value)
         command_id = command["command_id"]
         with self._lock:
@@ -795,7 +932,10 @@ class LineOrchestrator:
             contaminated=contaminated,
             untrusted_input=task.get("untrusted_input") if contaminated else None,
         )
-        intent = build_action_intent(plan)
+        intent = build_action_intent(
+            plan,
+            work_order_id=self._active_work_order_id,
+        )
         with self._lock:
             task["intent"] = intent
             task["status"] = "SUBMITTED"

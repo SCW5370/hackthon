@@ -1,22 +1,20 @@
-# SafeExec V3 Agent 生产线联调
+# SafeExec V4 签名工单生产线联调
 
-本方案将 Mac 上的 Dashboard、Orchestrator、Runtime 与 Windows 上的 Guard、JOY OF PROGRAMMING 串成一条常驻执行链。操作员使用自然语言生成动态工单，攻击可绑定任意尚未执行的样品。
+本方案将 Mac 上的可信配置页、Dashboard、Orchestrator、Runtime 与 Windows 上的 Guard、JOY OF PROGRAMMING 串成一条常驻执行链。可信控制面签发结构化 WorkOrder，Agent 只提出候选动作，不能自行扩大授权。
 
 ## 架构
 
 ```text
-Dashboard :8787
-    ↓ 控制 / SSE
-Orchestrator :8789
-    ↓ ActionIntent
-Runtime :8790
+Config :8787/config → Signed WorkOrder
+         ↓ register + verify       ↓ activate
+Runtime :8790 ← ActionIntent v2 ← Orchestrator :8789 ← Dashboard :8787
     ↓ Signed Action Lease
 Windows Guard :8788
     ↓ JoyCommand
 JOY RPC :18189
 ```
 
-Runtime 持有 Ed25519 私钥。Windows Guard 只持有公钥，并与真实 `JoyDriver` 运行在执行侧。
+Runtime 持有 Lease 私钥；Windows Guard 只持有对应公钥。可信控制面持有另一组 WorkOrder 私钥，Runtime 只信任其公钥。
 
 ## 1. Windows：预先启动 JOY 与 Guard
 
@@ -60,6 +58,7 @@ SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
 服务地址：
 
 - Dashboard：`http://127.0.0.1:8787`
+- 可信配置：`http://127.0.0.1:8787/config`
 - Orchestrator：`http://127.0.0.1:8789`
 - Runtime：`http://127.0.0.1:8790`
 
@@ -70,21 +69,21 @@ curl http://127.0.0.1:8789/healthz
 curl http://127.0.0.1:8790/healthz
 ```
 
-## 3. V3 演示流程
+## 3. V4 演示流程
 
-在 Dashboard 中依次操作：
+依次操作：
 
-1. 点击“复位”。该动作会先由 Runtime 签发 Lease，再由 Guard 验签，不能绕过 SafeExec。
-2. 输入“把距离机械臂最近的四个样品运送到分析区”，点击“生成工单”。
-3. 在不可信输入区选择任意排队样品，例如 `sample-E`，点击“注入标签”。
-4. 点击“开始”，观察动态任务队列。
+1. 在 Dashboard 点击“复位”。该动作仍经过 Runtime、Lease 与 Guard。
+2. 打开 `/config`，明确选择样品、路径和有效期，点击“签名并激活工单”。
+3. 返回 Dashboard，在不可信输入区选择任意排队样品并注入标签。
+4. 点击“开始”，观察 Agent 意图、WorkOrder 匹配、Lease 和物理结果。
 
 预期过程：
 
-1. Replay Function Calling 选择 `sample-C`、`sample-A`、`sample-E`、`sample-D`。
+1. Runtime 先验证 WorkOrder 的签名、签发方、主体、有效期和组织策略上限。
 2. 机械臂投放后停留在当前站点，下一件直接从当前位置去取货，不再逐件回 Home。
 3. 污染会话为 `sample-E` 生成 `cold-storage → waste-bin`。
-4. Runtime 返回 `NO_MATCHING_GRANT`，不签发 Lease，Guard 与 JOY 均不会收到恶意动作。
+4. Runtime 返回 `NO_MATCHING_GRANT` 或 `WORK_ORDER_GRANT_MISMATCH`，不签发 Lease，Guard 与 JOY 均不会收到恶意动作。
 5. Orchestrator 销毁污染会话，保持 `RECOVERING` 1.5 秒。
 6. Orchestrator 从可信工单创建干净会话，正确搬运 `sample-E` 并继续任务。
 

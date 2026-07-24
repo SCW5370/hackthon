@@ -1,4 +1,4 @@
-# SafeExec V3 — Agent-driven BioLab Line
+# SafeExec V4 — Signed WorkOrder Runtime
 
 > 面向具身 Agent 的零信任执行 Runtime。
 > BioLab Agent 持续提出动作，SafeExec 决定动作是否可在真实设备上执行。
@@ -6,9 +6,11 @@
 ## 架构
 
 ```
-                                  ┌→ Runtime :8790 → Guard :8788 ┐
-Dashboard :8787 → Orchestrator :8789                             ├→ JOY :18189
-                                  └→ Legacy Bridge :8791 ────────┘
+Config UI :8787/config → signed WorkOrder → Runtime :8790
+                                               ↑
+Dashboard :8787 → Orchestrator :8789 → ActionIntent v2
+                                  ├→ Runtime → Guard :8788 → JOY :18189
+                                  └→ Legacy Bridge :8791 (demo only)
 ```
 
 Legacy Bridge 仅用于显式启用的无保护 A/B 演示。默认执行路径始终经过 Runtime、一次性 Lease 与 Guard。
@@ -17,20 +19,23 @@ Legacy Bridge 仅用于显式启用的无保护 A/B 演示。默认执行路径�
 
 | 组件 | 职责 |
 |------|------|
-| **Policy Engine** | 精确匹配 ActionIntent 与 MissionSpec grants |
+| **OrganizationPolicy** | 长期权限上限，约束允许接入的主体、动作、资源与事实 |
+| **WorkOrder Registry** | 验证控制面签名、有效期、精确授权范围与执行预算 |
+| **Policy Engine** | 同时匹配 ActionIntent、OrganizationPolicy 与 WorkOrder |
 | **Lease Authority** | Ed25519 签名签发 5 秒 Lease |
 | **Fact Hub** | 存储摄像头等实时状态，支持 TTL 过期 |
 | **Guard** | 验签 + SQLite 防重放 + 执行拦截 |
-| **Orchestrator** | 自然语言工单、动态队列、Agent 会话、攻击注入与单次恢复 |
-| **Dashboard** | 控制常驻生产线并按事件序号增量展示证据 |
+| **Orchestrator** | 消费已验证工单、驱动 Agent 会话、攻击注入与单次恢复 |
+| **Dashboard** | 运行监控与增量审计，不签发可信授权 |
+| **Config UI** | 结构化配置并签发可信 WorkOrder |
 
 ## 安全机制
 
-1. **Policy Engine** - 精确匹配 grant，不允许未授权动作
-2. **Lease (5秒)** - 短时有效，过期自动失效
-3. **Ed25519 签名** - 防篡改
+1. **双层授权** - 长期 OrganizationPolicy 与短期 WorkOrder 必须同时匹配
+2. **签名工单** - Ed25519 验签、主体绑定、有效期与单项执行预算
+3. **Lease (5秒)** - 短时有效，且绑定 ActionIntent 与 WorkOrder
 4. **SQLite 防重放** - 同一 Lease 只能使用一次
-5. **Intent Hash 验证** - 检测篡改
+5. **Intent Hash 验证** - 检测动作或 `work_order_id` 篡改
 
 ## 快速开始
 
@@ -46,27 +51,35 @@ SAFEEXEC_GUARD_URL=http://100.123.243.7:8788 ./scripts/start_stack.sh
 
 # 打开控制台
 open http://127.0.0.1:8787
+open http://127.0.0.1:8787/config
 
 # 测试
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
+V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 [`docs/e2e-integration.md`](docs/e2e-integration.md)。
 
 ## 数据契约
 
-### JobManifest（Function Calling → Orchestrator）
+### WorkOrder（可信控制面 → Runtime）
 
 ```json
 {
-  "schema_version": "safeexec.job-manifest.v1",
-  "job_id": "16e25368-0948-4e31-9863-94f6488d31de",
-  "operator_text": "把距离机械臂最近的四个样品运送到分析区",
-  "sample_ids": ["sample-C", "sample-A", "sample-E", "sample-D"],
-  "source": "cold-storage",
-  "destination": "analyzer-01",
-  "selection_strategy": "nearest"
+  "schema_version": "safeexec.work-order.v1",
+  "work_order_id": "16e25368-0948-4e31-9863-94f6488d31de",
+  "issuer_id": "biolab-control-plane",
+  "subject_principal_id": "lab-agent-01",
+  "valid_until_ms": 1784803600125,
+  "grants": [{
+    "grant_id": "work-order-sample-a-analysis",
+    "action": "lab.sample.transfer",
+    "resource": {"type": "lab.sample", "id": "sample-A"},
+    "arguments": {"source": "cold-storage", "destination": "analyzer-01"},
+    "max_executions": 1
+  }],
+  "key_id": "biolab-control-plane-key-01",
+  "signature": "base64url-ed25519-signature"
 }
 ```
 
@@ -74,9 +87,10 @@ V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 
 ```json
 {
-  "schema_version": "safeexec.action.v1",
+  "schema_version": "safeexec.action.v2",
   "request_id": "d7588eb9-f22c-49a7-9814-b46260e19d8e",
   "principal_id": "lab-agent-01",
+  "work_order_id": "16e25368-0948-4e31-9863-94f6488d31de",
   "issued_at_ms": 1784800000125,
   "action": "lab.sample.transfer",
   "resource": {"type": "lab.sample", "id": "sample-A"},
@@ -101,6 +115,9 @@ V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 ### Runtime
 
 - `POST /v1/actions` - Agent 提交动作
+- `POST /v1/work-orders` - 注册并验证签名工单
+- `GET /v1/work-orders/{id}` - 查询工单与执行预算
+- `GET /v1/config` - 查询组织策略与可信签发方
 - `POST /v1/facts` - 适配器更新 Fact
 - `GET /v1/state` - 当前 Fact 与最近一次动作摘要
 - `GET /v1/events` - 审计事件流
@@ -116,7 +133,7 @@ V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 ### Orchestrator
 
 - `GET /v1/line/state`
-- `POST /v1/agent/commands`
+- `POST /v1/work-orders/activate`
 - `POST /v1/control/start|pause|resume|reset`
 - `POST /v1/testing/injections`
 - `GET /v1/events?after=<seq>`
@@ -125,7 +142,8 @@ V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 ### Dashboard
 
 - `GET /api/dashboard/v2`（响应 schema 为 `safeexec.dashboard.v3`）
-- `POST /api/agent/commands`
+- `GET /api/config`
+- `POST /api/work-orders`
 - `POST /api/control/start|pause|resume|reset`
 - `POST /api/testing/injections`
 - `GET /api/events/stream?after=<seq>`
@@ -145,8 +163,10 @@ V3 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 ### 密钥
 
 ```
-Private key:  只保存在 X5 Runtime
-Public key:   部署到 Windows Guard
+Lease private key:       只保存在 Runtime
+Lease public key:        部署到 Windows Guard
+WorkOrder private key:   只保存在可信控制面
+WorkOrder public key:    只部署到 Runtime
 ```
 
 **警告: 永远不要把私钥提交到源代码仓库！**

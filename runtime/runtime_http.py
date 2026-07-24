@@ -18,12 +18,13 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .contracts import ActionIntent, Fact, MissionSpec
+from .contracts import ActionIntent, Decision, Fact, MissionSpec, TRANSFER_ACTION
 from .policy_engine import PolicyEngine
 from .lease_authority import LeaseAuthority
 from .fact_hub import FactHub
 from .event_ledger import EventLedger
 from .state_machine import StateMachine
+from .work_orders import WorkOrderRegistry
 
 
 class SafeExecRuntime:
@@ -38,9 +39,12 @@ class SafeExecRuntime:
         private_key_b64: str,
         key_id: str = "x5-runtime-key-01",
         guard_url: str = "http://localhost:8788/v1/execute",
+        trusted_work_order_keys: dict[str, str] | None = None,
+        require_work_order_for_actions: bool = False,
     ):
         self.mission_spec = mission_spec
         self.guard_url = guard_url
+        self.require_work_order_for_actions = require_work_order_for_actions
 
         # 核心组件
         self.policy_engine = PolicyEngine(mission_spec)
@@ -51,6 +55,11 @@ class SafeExecRuntime:
         self._latest_action_lock = threading.RLock()
         self._latest_action: dict | None = None
         self._action_lock = threading.Lock()
+        self.work_orders = (
+            WorkOrderRegistry(trusted_work_order_keys, mission_spec)
+            if trusted_work_order_keys
+            else None
+        )
 
         # 当关键 Fact 变化时触发状态变化
         self.fact_hub.subscribe(self._on_critical_fact_change)
@@ -105,7 +114,7 @@ class SafeExecRuntime:
             },
         )
 
-        # 2. Policy Engine 评估
+        # 2. OrganizationPolicy 评估。MissionSpec 是长期权限上限。
         facts = self.fact_hub.get_all_facts()
         decision = self.policy_engine.evaluate(intent, facts)
 
@@ -130,7 +139,56 @@ class SafeExecRuntime:
             )
             return response
 
-        # 3. 允许 - 签发 Lease
+        # 3. WorkOrder 评估。Agent 只能在本次短期业务授权内行动。
+        matched_work_order_grant = None
+        if intent.action == TRANSFER_ACTION and (
+            self.require_work_order_for_actions
+            or intent.work_order_id is not None
+        ):
+            if self.work_orders is None:
+                order_reason = "WORK_ORDER_NOT_FOUND"
+            else:
+                matched_work_order_grant, order_reason = self.work_orders.authorize(
+                    intent
+                )
+            if order_reason is not None:
+                denied = Decision.deny(
+                    request_id=intent.request_id,
+                    reason_code=order_reason,
+                )
+                self._emit_event(
+                    "work_order.denied",
+                    "runtime",
+                    {
+                        "request_id": intent.request_id,
+                        "work_order_id": intent.work_order_id,
+                        "reason_code": order_reason,
+                    },
+                    "warning",
+                )
+                response = {"status": "denied", "decision": denied.to_dict()}
+                self._record_latest_action(
+                    intent=intent.to_dict(),
+                    status="denied",
+                    decision=denied.to_dict(),
+                )
+                return response
+            decision = Decision.allow(
+                request_id=intent.request_id,
+                matched_grant_id=matched_work_order_grant.grant_id,
+                fact_refs=decision.fact_refs,
+            )
+            self._emit_event(
+                "work_order.matched",
+                "runtime",
+                {
+                    "request_id": intent.request_id,
+                    "work_order_id": intent.work_order_id,
+                    "grant_id": matched_work_order_grant.grant_id,
+                },
+            )
+
+        # 4. 允许 - 签发 Lease
         self._emit_event(
             "policy.allowed",
             "runtime",
@@ -144,7 +202,7 @@ class SafeExecRuntime:
             intent=intent,
             decision=decision,
             audience=audience,
-            mission_id=self.mission_spec.mission_id,
+            mission_id=intent.work_order_id or self.mission_spec.mission_id,
         )
 
         self._emit_event(
@@ -156,10 +214,29 @@ class SafeExecRuntime:
             },
         )
 
-        # 4. 调用 Guard 执行 (同步)
+        # 5. 调用 Guard 执行 (同步)
         guard_response = self._call_guard(intent, lease)
+        if (
+            matched_work_order_grant is not None
+            and intent.work_order_id
+            and guard_response.get("status") == "executed"
+        ):
+            assert self.work_orders is not None
+            self.work_orders.consume(
+                intent.work_order_id,
+                matched_work_order_grant.grant_id,
+            )
+            self._emit_event(
+                "work_order.grant_consumed",
+                "runtime",
+                {
+                    "work_order_id": intent.work_order_id,
+                    "grant_id": matched_work_order_grant.grant_id,
+                    "request_id": intent.request_id,
+                },
+            )
 
-        # 5. 返回结果
+        # 6. 返回结果
         response = {
             "status": "ok",
             "decision": decision.to_dict(),
@@ -259,6 +336,45 @@ class SafeExecRuntime:
         except ValueError as e:
             return {"status": "error", "message": str(e)}
 
+    def register_work_order(self, value: dict) -> dict:
+        if self.work_orders is None:
+            raise ValueError("WorkOrder trust is not configured")
+        order = self.work_orders.register(value)
+        self._emit_event(
+            "work_order.registered",
+            "runtime",
+            {
+                "work_order_id": order.work_order_id,
+                "issuer_id": order.issuer_id,
+                "subject_principal_id": order.subject_principal_id,
+                "grant_count": len(order.grants),
+                "valid_until_ms": order.valid_until_ms,
+            },
+        )
+        status = self.work_orders.status(order.work_order_id)
+        assert status is not None
+        return {"status": "registered", "work_order": status}
+
+    def get_work_order(self, work_order_id: str) -> dict | None:
+        if self.work_orders is None:
+            return None
+        return self.work_orders.status(work_order_id)
+
+    def list_work_orders(self) -> dict:
+        return {
+            "work_orders": self.work_orders.list() if self.work_orders else [],
+        }
+
+    def get_config(self) -> dict:
+        return {
+            "schema_version": "safeexec.runtime-config.v1",
+            "organization_policy": self.mission_spec.to_dict(),
+            "work_order_enforcement": self.require_work_order_for_actions,
+            "trusted_work_order_issuers": (
+                list(self.work_orders.trusted_issuers) if self.work_orders else []
+            ),
+        }
+
     def get_events(self, after_seq: int = 0) -> dict:
         """获取事件"""
         return {
@@ -312,6 +428,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"public_key": _runtime.lease_authority.get_public_key_b64()})
             return
 
+        if parsed.path == "/v1/config":
+            self._json(_runtime.get_config())
+            return
+
+        if parsed.path == "/v1/work-orders":
+            self._json(_runtime.list_work_orders())
+            return
+
+        if parsed.path.startswith("/v1/work-orders/"):
+            work_order_id = parsed.path.rsplit("/", 1)[-1]
+            value = _runtime.get_work_order(work_order_id)
+            if value is None:
+                self._error(HTTPStatus.NOT_FOUND, "WorkOrder not found")
+            else:
+                self._json({"work_order": value})
+            return
+
         self._error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_POST(self):
@@ -336,6 +469,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(result)
             return
 
+        if parsed.path == "/v1/work-orders":
+            try:
+                result = _runtime.register_work_order(data)
+            except ValueError as exc:
+                self._error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._json(result, HTTPStatus.CREATED)
+            return
+
         self._error(HTTPStatus.NOT_FOUND, "Not found")
 
     def _json(self, data: dict, status: int = HTTPStatus.OK):
@@ -351,7 +493,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"error": message}).encode("utf-8"))
 
 
-def create_runtime(mission_path: str, private_key_path: str, guard_url: str) -> SafeExecRuntime:
+def create_runtime(
+    mission_path: str,
+    private_key_path: str,
+    guard_url: str,
+    *,
+    work_order_public_key_path: str | None = None,
+    work_order_issuer_id: str = "biolab-control-plane",
+) -> SafeExecRuntime:
     """创建 Runtime 实例"""
     import yaml
 
@@ -363,11 +512,17 @@ def create_runtime(mission_path: str, private_key_path: str, guard_url: str) -> 
     # 加载私钥
     with open(private_key_path) as f:
         private_key_b64 = f.read().strip()
+    trusted_work_order_keys = None
+    if work_order_public_key_path:
+        with open(work_order_public_key_path) as f:
+            trusted_work_order_keys = {work_order_issuer_id: f.read().strip()}
 
     return SafeExecRuntime(
         mission_spec=mission,
         private_key_b64=private_key_b64,
         guard_url=guard_url,
+        trusted_work_order_keys=trusted_work_order_keys,
+        require_work_order_for_actions=trusted_work_order_keys is not None,
     )
 
 
@@ -378,11 +533,22 @@ def main():
     parser.add_argument("--guard-url", default="http://localhost:8788/v1/execute")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8790)
+    parser.add_argument("--work-order-public-key")
+    parser.add_argument(
+        "--work-order-issuer-id",
+        default="biolab-control-plane",
+    )
 
     args = parser.parse_args()
 
     global _runtime
-    _runtime = create_runtime(args.mission, args.key, args.guard_url)
+    _runtime = create_runtime(
+        args.mission,
+        args.key,
+        args.guard_url,
+        work_order_public_key_path=args.work_order_public_key,
+        work_order_issuer_id=args.work_order_issuer_id,
+    )
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"SafeExec Runtime listening on {args.host}:{args.port}")
