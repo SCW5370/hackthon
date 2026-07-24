@@ -175,6 +175,8 @@ class ReplayProvider:
     session is always recreated from the trusted work order.
     """
 
+    name = "replay-function-calling"
+
     def plan(
         self,
         sample_id: str,
@@ -320,6 +322,10 @@ class LineOrchestrator:
                 "line_state": self._line_state,
                 "fact_mode": self.fact_mode,
                 "execution_mode": self.execution_mode,
+                "agent_provider": {
+                    "job": getattr(self.job_compiler, "name", "unknown"),
+                    "action": getattr(self.provider, "name", "unknown"),
+                },
                 "worker_alive": bool(self._worker and self._worker.is_alive()),
             }
 
@@ -349,6 +355,10 @@ class LineOrchestrator:
                 "last_error": json.loads(json.dumps(self._last_error)),
                 "last_seq": self._seq,
                 "fact_mode": self.fact_mode,
+                "agent_provider": {
+                    "job": getattr(self.job_compiler, "name", "unknown"),
+                    "action": getattr(self.provider, "name", "unknown"),
+                },
                 "execution_mode": self.execution_mode,
                 "execution_modes": {
                     "protected": {"available": True},

@@ -102,7 +102,8 @@ function renderExecutionMode(line) {
 function renderJob(line) {
   const job = line.job_manifest || {};
   const count = Array.isArray(job.sample_ids) ? job.sample_ids.length : 0;
-  setText("provider-chip", job.provider === "openai-compatible-function-calling"
+  const provider = line.agent_provider?.job || job.provider;
+  setText("provider-chip", provider === "openai-compatible-function-calling"
     ? "LLM Function Call" : "Replay Function Call");
   setText("compiled-job", count
     ? `已冻结：${job.sample_ids.join("、")}，目标为${LOCATION_LABELS[job.destination] || job.destination}`

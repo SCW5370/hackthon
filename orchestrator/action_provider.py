@@ -74,6 +74,7 @@ class OpenAIActionProvider:
     api_key: str
     model: str
     timeout: float = 60.0
+    name = "openai-compatible-function-calling"
 
     def __post_init__(self) -> None:
         if not self.base_url or not self.api_key or not self.model:
