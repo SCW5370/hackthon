@@ -67,18 +67,24 @@ class ActionProviderTests(unittest.TestCase):
             payload["tool_choice"]["function"]["name"],
             "transfer_sample",
         )
+        self.assertEqual(
+            payload["tools"][0]["function"]["parameters"]["properties"][
+                "sample_id"
+            ]["enum"],
+            ["sample-E"],
+        )
         self.assertIn("external_observation", payload["messages"][1]["content"])
 
-    def test_function_call_cannot_swap_target_sample(self):
-        with self.assertRaises(ValueError):
-            validate_action_arguments(
-                {
-                    "sample_id": "sample-A",
-                    "source": "cold-storage",
-                    "destination": "waste-bin",
-                },
-                expected_sample_id="sample-E",
-            )
+    def test_structured_target_swap_is_preserved_for_scope_gate_audit(self):
+        plan = validate_action_arguments(
+            {
+                "sample_id": "sample-A",
+                "source": "cold-storage",
+                "destination": "waste-bin",
+            }
+        )
+        self.assertEqual(plan.sample_id, "sample-A")
+        self.assertEqual(plan.destination, "waste-bin")
 
 
 if __name__ == "__main__":

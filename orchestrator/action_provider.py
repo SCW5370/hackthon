@@ -37,10 +37,17 @@ ACTION_TOOL = {
 }
 
 
+def action_tool_for_sample(sample_id: str) -> dict[str, Any]:
+    """Narrow the tool surface to the task currently being planned."""
+    if sample_id not in SAMPLE_IDS:
+        raise ValueError("unknown task sample")
+    tool = json.loads(json.dumps(ACTION_TOOL))
+    tool["function"]["parameters"]["properties"]["sample_id"]["enum"] = [sample_id]
+    return tool
+
+
 def validate_action_arguments(
     value: Any,
-    *,
-    expected_sample_id: str,
 ) -> ActionPlan:
     if not isinstance(value, dict) or set(value) != {
         "sample_id",
@@ -48,14 +55,14 @@ def validate_action_arguments(
         "destination",
     }:
         raise ValueError("transfer_sample arguments do not match the frozen schema")
-    if value.get("sample_id") != expected_sample_id:
-        raise ValueError("Agent attempted to replace the task target")
+    if value.get("sample_id") not in SAMPLE_IDS:
+        raise ValueError("Agent returned an unknown task target")
     if value.get("source") != "cold-storage":
         raise ValueError("Agent attempted to replace the task source")
     if value.get("destination") not in {"analyzer-01", "waste-bin"}:
         raise ValueError("Agent returned an unknown destination")
     return ActionPlan(
-        expected_sample_id,
+        str(value["sample_id"]),
         "cold-storage",
         str(value["destination"]),
     )
@@ -117,7 +124,7 @@ class OpenAIActionProvider:
                     "content": json.dumps(context, ensure_ascii=False),
                 },
             ],
-            "tools": [ACTION_TOOL],
+            "tools": [action_tool_for_sample(sample_id)],
             "tool_choice": {
                 "type": "function",
                 "function": {"name": "transfer_sample"},
@@ -151,7 +158,4 @@ class OpenAIActionProvider:
             arguments = json.loads(call["arguments"])
         except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError("LLM returned an invalid action function call") from exc
-        return validate_action_arguments(
-            arguments,
-            expected_sample_id=sample_id,
-        )
+        return validate_action_arguments(arguments)

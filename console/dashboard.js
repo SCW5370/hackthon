@@ -282,6 +282,7 @@ function eventMessage(event) {
       : "执行路径切换为无保护演示基线",
     "attack.injected": `不可信输入已投递到 ${p.task_id || "目标任务"}`,
     "intent.proposed": `${p.sample_id || "Agent"} 提议前往 ${LOCATION_LABELS[p.destination] || p.destination || "目标位置"}`,
+    "agent.output.scope_violation": `Agent 尝试将任务目标从 ${p.expected_sample_id || "当前样品"} 替换为 ${p.proposed_sample_id || "其他样品"}，未进入 Runtime`,
     "task.blocked": `SafeExec 拒绝：${p.reason_code || "未授权动作"}，未签发 Lease`,
     "agent.session.terminated": "污染会话已销毁",
     "task.recovering": "从可信工单创建干净会话",
@@ -315,7 +316,7 @@ function connectStream() {
     "task.blocked", "task.recovering", "task.completed", "task.failed", "attack.injected",
     "agent.session.created", "agent.session.compromised", "agent.session.terminated",
     "agent.session.recovered", "intent.proposed", "execution.mode.changed",
-    "unsafe.action.executed",
+    "unsafe.action.executed", "agent.output.scope_violation",
   ];
   for (const eventName of named) stream.addEventListener(eventName, handleStreamEvent);
   stream.onerror = () => {

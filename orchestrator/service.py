@@ -757,7 +757,10 @@ class LineOrchestrator:
         response = self._attempt(task, contaminated=contaminated)
         reason = self._deny_reason(response)
         if reason is not None:
-            if not contaminated or reason != "NO_MATCHING_GRANT":
+            if not contaminated or reason not in {
+                "NO_MATCHING_GRANT",
+                "AGENT_OUTPUT_SCOPE_VIOLATION",
+            }:
                 self._fail_task(task, reason, "SafeExec denied without recoverable injection")
                 return
             self._handle_registered_block(task, injection_id, response)
@@ -813,6 +816,36 @@ class LineOrchestrator:
                 "orchestrator",
                 {"task_id": task["task_id"], "request_id": intent["request_id"]},
             )
+        if plan.sample_id != task["sample_id"]:
+            response = {
+                "status": "denied",
+                "decision": {
+                    "schema_version": "safeexec.decision.v1",
+                    "decision_id": str(uuid.uuid4()),
+                    "request_id": intent["request_id"],
+                    "effect": "deny",
+                    "reason_code": "AGENT_OUTPUT_SCOPE_VIOLATION",
+                    "matched_grant_id": None,
+                    "evaluated_at_ms": int(time.time() * 1000),
+                    "fact_refs": [],
+                },
+            }
+            with self._lock:
+                task["decision"] = response["decision"]
+                self._emit(
+                    "agent.output.scope_violation",
+                    "safeexec_scope",
+                    {
+                        "task_id": task["task_id"],
+                        "expected_sample_id": task["sample_id"],
+                        "proposed_sample_id": plan.sample_id,
+                        "request_id": intent["request_id"],
+                        "runtime_reached": False,
+                        "guard_reached": False,
+                    },
+                    "critical",
+                )
+            return response
         if (
             self.execution_mode == "protected"
             and self.fact_mode == "demo"
@@ -853,6 +886,7 @@ class LineOrchestrator:
         response: dict[str, Any],
     ) -> None:
         assert injection_id is not None
+        reason_code = self._deny_reason(response) or "UNKNOWN_DENIAL"
         with self._lock:
             task["status"] = "BLOCKED"
             task["blocked_intent"] = json.loads(json.dumps(task["intent"]))
@@ -866,17 +900,21 @@ class LineOrchestrator:
             record["updated_at_ms"] = int(time.time() * 1000)
             record["result"] = {
                 "effect": "deny",
-                "reason_code": "NO_MATCHING_GRANT",
+                "reason_code": reason_code,
                 "lease_issued": False,
                 "guard_reached": False,
             }
             session_id = task["session_id"]
             self._emit(
                 "task.blocked",
-                "runtime",
+                (
+                    "safeexec_scope"
+                    if reason_code == "AGENT_OUTPUT_SCOPE_VIOLATION"
+                    else "runtime"
+                ),
                 {
                     "task_id": task["task_id"],
-                    "reason_code": "NO_MATCHING_GRANT",
+                    "reason_code": reason_code,
                     "lease_issued": False,
                     "guard_reached": False,
                 },

@@ -5,6 +5,7 @@ import unittest
 import uuid
 
 from biolab.catalog import SAMPLE_IDS
+from lab_agent.contracts import ActionPlan
 from orchestrator.service import (
     AuthorizationError,
     ConflictError,
@@ -123,6 +124,18 @@ class FakeUnsafeExecutor:
         }
 
 
+class TargetSwappingProvider:
+    name = "target-swapping-test"
+
+    def plan(self, sample_id, *, contaminated, untrusted_input=None):
+        del untrusted_input
+        return ActionPlan(
+            "sample-A" if contaminated else sample_id,
+            "cold-storage",
+            "waste-bin" if contaminated else "analyzer-01",
+        )
+
+
 def injection(injection_id=None, target_sample="sample-C"):
     return {
         "schema_version": "safeexec.attack-injection.v1",
@@ -229,6 +242,37 @@ class OrchestratorTests(unittest.TestCase):
         )
         for field in ("action", "resource", "arguments"):
             self.assertEqual(protected_candidate[field], unsafe.actions[0][field])
+
+    def test_injected_target_swap_is_blocked_and_clean_session_recovers(self) -> None:
+        runtime = FakeRuntime()
+        app = LineOrchestrator(
+            runtime,
+            provider=TargetSwappingProvider(),
+            recovery_delay=0,
+        )
+        app.compile_operator_command(
+            self.operator_command("把 sample-E 运送到分析区")
+        )
+        app.register_injection(injection(target_sample="sample-E"))
+        app.start()
+        self.assertEqual(app.wait_until_terminal(), "COMPLETED")
+        state = app.snapshot()
+        task = state["tasks"][0]
+        self.assertEqual(task["blocked_intent"]["resource"]["id"], "sample-A")
+        self.assertEqual(
+            task["blocked_decision"]["reason_code"],
+            "AGENT_OUTPUT_SCOPE_VIOLATION",
+        )
+        self.assertEqual(task["intent"]["resource"]["id"], "sample-E")
+        self.assertEqual(state["counters"]["blocked_actions"], 1)
+        self.assertEqual(state["counters"]["recovered_tasks"], 1)
+        transfer_actions = [
+            action
+            for action in runtime.actions
+            if action["action"] == "lab.sample.transfer"
+        ]
+        self.assertEqual(len(transfer_actions), 1)
+        self.assertEqual(transfer_actions[0]["resource"]["id"], "sample-E")
 
     def test_natural_language_compiles_dynamic_four_sample_job(self) -> None:
         runtime = FakeRuntime()
