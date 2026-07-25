@@ -234,6 +234,56 @@ class DashboardServerTests(unittest.TestCase):
             "EXECUTION_OUTCOME_UNKNOWN",
         )
 
+    def test_restore_forces_protected_mode_before_reset(self) -> None:
+        private_key, _ = LeaseAuthority.generate_keypair()
+        backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
+            runtime_url="http://runtime",
+            guard_url="http://guard",
+            work_order_issuer=WorkOrderIssuer(private_key),
+        )
+        with (
+            patch(
+                "dev.dashboard_server.json_request",
+                return_value={
+                    "line_state": "ERROR",
+                    "execution_mode": "unsafe-baseline",
+                    "last_error": {"code": "ORCHESTRATOR_FAILURE"},
+                    "unsafe_recovery": None,
+                },
+            ),
+            patch.object(
+                backend,
+                "set_execution_mode",
+                return_value={
+                    "line_state": "ERROR",
+                    "execution_mode": "protected",
+                    "last_error": {"code": "ORCHESTRATOR_FAILURE"},
+                },
+            ) as mode,
+            patch.object(
+                backend,
+                "control",
+                side_effect=[
+                    {"line_state": "STOPPED"},
+                    {"line_state": "RUNNING"},
+                ],
+            ),
+            patch.object(
+                backend,
+                "issue_work_order",
+                return_value={"work_order": {"work_order_id": "order"}},
+            ),
+            patch.object(
+                backend,
+                "set_continuous_mode",
+                return_value={"continuous_mode": True},
+            ),
+        ):
+            result = backend.restore_demo()
+        self.assertEqual(result["status"], "restored")
+        mode.assert_called_once_with("protected", "")
+
     def test_restore_supervisor_repairs_later_work_order_expiry(self) -> None:
         supervisor = DemoRestoreSupervisor(
             self.backend,

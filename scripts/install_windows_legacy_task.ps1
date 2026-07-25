@@ -1,12 +1,15 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Token,
-    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$RepoRoot = "",
     [string]$TaskName = "Motion Gate Legacy Baseline",
     [int]$Port = 8791
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $RepoRoot = Split-Path -Parent $PSScriptRoot
+}
 $RepoRoot = (Resolve-Path $RepoRoot).Path
 $RunDir = Join-Path $RepoRoot ".run"
 $TokenFile = Join-Path $RunDir "legacy_token.txt"

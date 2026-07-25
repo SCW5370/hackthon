@@ -717,7 +717,13 @@ class LineOrchestrator:
             "configure": state == "STOPPED",
             "inject": state in {"STOPPED", "RUNNING", "PAUSE_PENDING", "PAUSED"}
             and self._unsafe_recovery_pending is None,
-            "mode": state in {"STOPPED", "RUNNING", "PAUSED"}
+            "mode": (
+                state in {"STOPPED", "RUNNING", "PAUSED"}
+                or (
+                    state == "ERROR"
+                    and self.execution_mode == "unsafe-baseline"
+                )
+            )
             and state not in {"RECOVERING", "PAUSE_PENDING"}
             and not (
                 self._unsafe_recovery_pending is not None
@@ -777,7 +783,10 @@ class LineOrchestrator:
                     "previous": previous,
                     "current": mode,
                     "safeexec_enabled": mode == "protected",
-                    "applies_after_current_action": self._current_task_id is not None,
+                    "applies_after_current_action": (
+                        self._line_state in {"RUNNING", "PAUSE_PENDING"}
+                        and self._current_task_id is not None
+                    ),
                     "reconciliation_required": reconcile,
                 },
                 "critical" if mode == "unsafe-baseline" else "info",

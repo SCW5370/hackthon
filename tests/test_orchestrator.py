@@ -201,6 +201,12 @@ class FakeUnsafeExecutor:
         }
 
 
+class FailingUnsafeExecutor(FakeUnsafeExecutor):
+    def submit_action(self, intent):
+        del intent
+        raise RuntimeError("legacy baseline unavailable")
+
+
 class TargetSwappingProvider:
     name = "target-swapping-test"
 
@@ -445,6 +451,25 @@ class OrchestratorTests(unittest.TestCase):
         ]
         self.assertEqual(protected_samples, ["sample-A"])
         self.assertEqual(unsafe_samples, ["sample-B"])
+
+    def test_failed_unsafe_path_can_always_return_to_protected_mode(self) -> None:
+        app = LineOrchestrator(
+            FakeRuntime(),
+            unsafe_executor=FailingUnsafeExecutor(),
+            unsafe_demo_enabled=True,
+            unsafe_demo_token="demo-token",
+            recovery_delay=0,
+        )
+        app.compile_operator_command(
+            self.operator_command("把样品A运送到分析区")
+        )
+        app.set_execution_mode("unsafe-baseline", "demo-token")
+        app.start()
+        self.assertEqual(app.wait_until_terminal(), "ERROR")
+        self.assertTrue(app.snapshot()["controls"]["mode"])
+        state = app.set_execution_mode("protected")
+        self.assertEqual(state["execution_mode"], "protected")
+        self.assertFalse(state["controls"]["mode"])
 
     def test_injected_target_swap_is_blocked_and_clean_session_recovers(self) -> None:
         runtime = FakeRuntime()

@@ -273,6 +273,13 @@ class DashboardBackend:
                     return {"status": "restored", "line": line}
                 state = str(line.get("line_state", "UNKNOWN"))
 
+            # Every recovery path returns to the protected execution boundary.
+            # A stale unsafe-baseline selection must never survive a reboot,
+            # expired authorization, or operator-requested demo restoration.
+            if line.get("execution_mode") != "protected":
+                line = self.set_execution_mode("protected", "")
+                state = str(line.get("line_state", "UNKNOWN"))
+
             last_error = line.get("last_error")
             error_code = (
                 str(last_error.get("code"))

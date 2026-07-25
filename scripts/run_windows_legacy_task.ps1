@@ -1,11 +1,14 @@
 param(
-    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$RepoRoot = "",
     [string]$PythonExe = "D:\steam\steamapps\common\JOY OF PROGRAMMING\JoyOfProgramming\Content\000_MyContent\External\python-3.10.4-embed-amd64\python.exe",
     [int]$Port = 8791,
     [int]$JoyWaitSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $RepoRoot = Split-Path -Parent $PSScriptRoot
+}
 $RepoRoot = (Resolve-Path $RepoRoot).Path
 $Runner = Join-Path $RepoRoot "scripts\run_windows_legacy_bridge.py"
 $TokenFile = Join-Path $RepoRoot ".run\legacy_token.txt"
