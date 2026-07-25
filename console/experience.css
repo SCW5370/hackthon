@@ -154,9 +154,9 @@ button:disabled { cursor: not-allowed; opacity: .4; }
 .line-pulse {
   min-height: 62px;
   display: grid;
-  grid-template-columns: minmax(190px, .8fr) minmax(260px, 1.15fr) auto auto;
+  grid-template-columns: minmax(190px, .72fr) minmax(220px, 1fr) auto auto auto;
   align-items: center;
-  gap: 28px;
+  gap: 20px;
   padding: 10px 28px;
   border-bottom: 1px solid var(--line);
   background: var(--base);
@@ -212,6 +212,40 @@ button:disabled { cursor: not-allowed; opacity: .4; }
   position: absolute;
   inset: 0 auto 0 -38%;
   background: var(--trusted);
+}
+.protection-switch {
+  display: grid;
+  gap: 5px;
+}
+.protection-switch > span {
+  color: var(--trusted);
+  font: 650 .58rem/1 var(--mono);
+  text-align: center;
+}
+.protection-switch > div {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--void);
+}
+.protection-switch button {
+  min-height: 29px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+  font-size: .62rem;
+  cursor: pointer;
+}
+.protection-switch button[aria-pressed="true"] {
+  background: var(--trusted-deep);
+  color: var(--ink);
+}
+.mode-unsafe .protection-switch > span { color: var(--blocked); }
+.mode-unsafe .protection-switch button[aria-pressed="true"] {
+  background: var(--blocked-deep);
 }
 .line-pulse.is-running .line-pulse-flow i::after {
   animation: pool-flow 1.8s linear infinite;
@@ -1116,7 +1150,7 @@ main { min-height: calc(100vh - 130px); }
   .execution-scene { align-content: center; }
   .physical-copy { display: flex; flex-direction: column; justify-content: center; }
   .line-pulse {
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto auto auto;
   }
   .line-pulse-flow { display: none; }
 }
@@ -1132,6 +1166,8 @@ main { min-height: calc(100vh - 130px); }
     padding: 10px 16px;
   }
   .line-pulse dl { display: none; }
+  .protection-switch { grid-row: 2; grid-column: 1 / -1; }
+  .protection-switch > div { justify-content: center; }
   .brand span { display: none; }
   .attack-library,
   .live-lab { width: min(100% - 32px, 680px); }

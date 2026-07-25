@@ -28,6 +28,12 @@ const EVENT_LABELS = {
   "agent.session.recovered": "干净会话恢复成功",
   "line.error": "产线失败关闭",
   "line.reset": "签名复位完成",
+  "execution.mode.changed": "执行边界模式已切换",
+  "unsafe.action.executed": "无保护动作抵达执行器",
+  "line.unsafe_hold": "危险结果已冻结等待处置",
+  "line.reconciliation.started": "签名复位正在核对物理状态",
+  "line.reconciliation.completed": "物理状态已恢复",
+  "agent.provider.fallback": "Agent 已切换确定性后备规划",
 };
 
 const SECURITY_EVENTS = new Set([
@@ -38,6 +44,10 @@ const SECURITY_EVENTS = new Set([
   "task.recovering",
   "agent.session.recovered",
   "line.error",
+  "unsafe.action.executed",
+  "line.unsafe_hold",
+  "line.reconciliation.started",
+  "line.reconciliation.completed",
 ]);
 
 let monitor = null;
@@ -267,12 +277,22 @@ function renderCausalFlow(dashboard) {
     );
     markBlocked(guardDenied ? "guard" : "runtime");
     decisionBox.classList.add("is-blocked");
-    setText("decision-kicker", "异常动作 · 失败关闭");
+    const authorizationExpired = [
+      "WORK_ORDER_EXPIRED",
+      "WORK_ORDER_BUDGET_EXHAUSTED",
+      "WORK_ORDER_RENEWAL_REQUIRED",
+    ].includes(String(lastError.code || ""));
+    setText(
+      "decision-kicker",
+      authorizationExpired ? "可信授权到期" : "异常动作 · 失败关闭",
+    );
     setText(
       "decision-title",
-      guardDenied
+      authorizationExpired
+        ? "设备保持不变，正在等待签发新工单"
+        : guardDenied
         ? "Device Guard 拒绝执行，等待签名复位"
-        : "SafeExec Runtime 中止链路，等待人工处置",
+        : "Motion Gate Runtime 中止链路，等待人工处置",
     );
     setText("decision-detail", errorText);
     setText(
@@ -289,12 +309,30 @@ function renderCausalFlow(dashboard) {
     return;
   }
 
+  if (challenge?.status === "executed") {
+    markFlowThrough("device");
+    document.querySelector('[data-layer="device"]')?.classList.add("is-blocked");
+    decisionBox.classList.add("is-blocked");
+    setText(
+      "decision-kicker",
+      `${ATTACK_LABELS[challenge.attack_type] || "攻击"} · 已执行`,
+    );
+    setText("decision-title", "保护关闭，未验证动作抵达物理执行器");
+    setText("decision-detail", challenge.detail || "物理状态已经改变。");
+    setText("decision-code", "SAFEEXEC_DISABLED");
+    setText("physical-outcome", "UNSAFE CHANGE");
+    setText("runtime-state", "已绕过");
+    setText("lease-state", "未签发");
+    setText("guard-state", "已绕过");
+    return;
+  }
+
   if (challenge?.status === "blocked") {
     const layer = challenge.blocked_at === "guard" ? "guard" : "runtime";
     markBlocked(layer);
     decisionBox.classList.add("is-blocked");
     setText("decision-kicker", `${ATTACK_LABELS[challenge.attack_type] || "攻击"} · 已阻断`);
-    setText("decision-title", `执行权在 ${layer === "guard" ? "Device Guard" : "SafeExec Runtime"} 被截断`);
+    setText("decision-title", `执行权在 ${layer === "guard" ? "Device Guard" : "Motion Gate Runtime"} 被截断`);
     setText("decision-detail", challenge.detail || "动作没有获得抵达设备的权限。");
     setText("decision-code", challenge.reason_code || "DENIED");
     setText("physical-outcome", "NO CHANGE");

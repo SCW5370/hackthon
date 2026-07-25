@@ -299,6 +299,15 @@ cd /opt/safeexec
 - `safeexec-dashboard.service`
 - `safeexec-healthcheck.timer`
 
+需要进行“关闭 Motion Gate”的 A/B 演示时，在 Windows 上以管理员
+PowerShell 安装独立的 Legacy Baseline 常驻任务。Token 只在安装时传入，
+之后保存在当前用户独占的 `.run/legacy_token.txt` 中；任务会等待 JOY RPC
+就绪，并在异常退出或重新登录后自动拉起，不弹出轮询窗口。
+
+```powershell
+.\scripts\install_windows_legacy_task.ps1 -Token "<与 X5 一致的演示 Token>"
+```
+
 完整的 X5、Windows Guard 和 JOY 联调流程见 [端到端部署指南](docs/e2e-integration.md)。
 
 ---
@@ -374,7 +383,7 @@ cd /opt/safeexec
 bash -n scripts/*.sh
 ```
 
-当前版本包含 **102 项自动化测试**，覆盖：
+当前版本包含 **109 项自动化测试**，覆盖：
 
 - Policy、WorkOrder、Lease 和 Fact 匹配；
 - 签名、哈希绑定、防重放与并发消费；

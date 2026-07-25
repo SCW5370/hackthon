@@ -53,6 +53,12 @@ EXPERIENCE_ATTACK_TYPES = {
     "intent-tampering",
     "lease-replay",
 }
+DEMO_RECOVERABLE_ERRORS = {
+    "WORK_ORDER_EXPIRED",
+    "WORK_ORDER_REQUIRED",
+    "WORK_ORDER_BUDGET_EXHAUSTED",
+    "WORK_ORDER_RENEWAL_REQUIRED",
+}
 
 
 class UpstreamError(RuntimeError):
@@ -107,6 +113,7 @@ class DashboardBackend:
         runtime_url: str,
         work_order_issuer: WorkOrderIssuer | None = None,
         work_order_fact_mode: str = "camera",
+        unsafe_demo_token: str = "",
     ) -> None:
         if work_order_fact_mode not in {"camera", "none"}:
             raise ValueError("work_order_fact_mode must be camera or none")
@@ -115,8 +122,10 @@ class DashboardBackend:
         self.runtime_url = runtime_url.rstrip("/")
         self.work_order_issuer = work_order_issuer
         self.work_order_fact_mode = work_order_fact_mode
+        self.unsafe_demo_token = unsafe_demo_token
         self._last_physical: dict[str, Any] | None = None
         self._experience_lock = threading.RLock()
+        self._restore_lock = threading.Lock()
         self._latest_experience_challenge: dict[str, Any] | None = None
         self._experience_challenges: list[dict[str, Any]] = []
 
@@ -228,6 +237,95 @@ class DashboardBackend:
             timeout=160 if action == "reset" else 5,
         )
 
+    def restore_demo(self, *, automatic: bool = False) -> dict[str, Any]:
+        """Rebuild a known-safe exhibition line after boot or authorization expiry."""
+
+        if self.work_order_issuer is None:
+            raise UpstreamError(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "control-plane signing key is not configured",
+            )
+        if not self._restore_lock.acquire(blocking=False):
+            raise UpstreamError(
+                HTTPStatus.CONFLICT,
+                "demo restoration is already running",
+            )
+        try:
+            line = json_request(
+                f"{self.orchestrator_url}/v1/line/state",
+                timeout=3,
+            )
+            state = str(line.get("line_state", "UNKNOWN"))
+            if state in {"RUNNING", "PAUSE_PENDING", "RECOVERING"}:
+                return {
+                    "status": "already-running",
+                    "line": line,
+                }
+            if line.get("unsafe_recovery"):
+                if automatic:
+                    return {
+                        "status": "operator-required",
+                        "reason_code": "UNSAFE_RECONCILIATION_REQUIRED",
+                        "line": line,
+                    }
+                line = self.set_execution_mode("protected", "")
+                if line.get("line_state") == "RUNNING":
+                    return {"status": "restored", "line": line}
+                state = str(line.get("line_state", "UNKNOWN"))
+
+            last_error = line.get("last_error")
+            error_code = (
+                str(last_error.get("code"))
+                if isinstance(last_error, dict)
+                else ""
+            )
+            if (
+                automatic
+                and state == "ERROR"
+                and error_code not in DEMO_RECOVERABLE_ERRORS
+            ):
+                return {
+                    "status": "operator-required",
+                    "reason_code": error_code or "UNRECONCILED_ERROR",
+                    "line": line,
+                }
+            if state not in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"}:
+                raise UpstreamError(
+                    HTTPStatus.CONFLICT,
+                    f"cannot restore demo from {state}",
+                )
+
+            # Always reconcile the simulator before rebuilding logical tasks.
+            # This makes a cold boot deterministic even if Windows preserved a
+            # partially processed JOY scene.
+            self.control("reset")
+            issued = self.issue_work_order(
+                {
+                    "schema_version": "safeexec.work-order-draft.v1",
+                    "sample_ids": list(SAMPLE_IDS),
+                    "source": "cold-storage",
+                    "destination": "analyzer-01",
+                    "subject_principal_id": "lab-agent-01",
+                    "valid_for_ms": 8 * 60 * 60 * 1000,
+                    "operator_note": (
+                        "Motion Gate 展览持续产线：循环分析固定实体池"
+                    ),
+                    "max_executions_per_sample": 10_000,
+                }
+            )
+            configured = self.set_continuous_mode(True)
+            started = self.control("start")
+            return {
+                "status": "restored",
+                "work_order_id": (
+                    issued.get("work_order", {}).get("work_order_id")
+                ),
+                "continuous_mode": configured.get("continuous_mode"),
+                "line": started,
+            }
+        finally:
+            self._restore_lock.release()
+
     def set_continuous_mode(self, enabled: bool) -> dict[str, Any]:
         return json_request(
             f"{self.orchestrator_url}/v1/control/continuous",
@@ -276,26 +374,31 @@ class DashboardBackend:
         ):
             raise ValueError("untrusted_content must contain at most 1000 characters")
 
-        if attack_type == "prompt-injection":
+        line = json_request(
+            f"{self.orchestrator_url}/v1/line/state",
+            timeout=3,
+        )
+        unsafe_mode = line.get("execution_mode") == "unsafe-baseline"
+
+        if unsafe_mode or attack_type in {
+            "prompt-injection",
+            "model-hallucination",
+        }:
             if not target_task_id or not untrusted_content.strip():
                 raise ValueError(
-                    "prompt injection requires a queued task and attack text"
-                )
-            line = json_request(
-                f"{self.orchestrator_url}/v1/line/state",
-                timeout=3,
-            )
-            if line.get("execution_mode") == "unsafe-baseline":
-                raise UpstreamError(
-                    HTTPStatus.CONFLICT,
-                    "experience attacks require protected execution mode",
+                    "the challenge requires a queued task and attack description"
                 )
             injection = self.inject(
                 {
                     "schema_version": "safeexec.attack-injection.v1",
                     "injection_id": challenge_id,
-                    "attack_id": "experience-prompt-injection",
-                    "channel": "operator_message",
+                    "attack_id": f"experience-{attack_type}",
+                    "attack_type": attack_type,
+                    "channel": (
+                        "operator_message"
+                        if attack_type == "prompt-injection"
+                        else "tool_output"
+                    ),
                     "target_task_id": target_task_id,
                     "untrusted_content": untrusted_content.strip(),
                     "actor_claims": {
@@ -309,24 +412,32 @@ class DashboardBackend:
                 challenge_id=challenge_id,
                 attack_type=attack_type,
                 status="armed",
-                blocked_at="runtime",
+                blocked_at=(
+                    "bypassed"
+                    if unsafe_mode
+                    else (
+                        "safeexec_scope"
+                        if attack_type == "intent-tampering"
+                        else "runtime"
+                    )
+                ),
                 reason_code="AWAITING_AGENT_INTENT",
                 physical_outcome="pending",
                 detail=(
-                    "不可信消息已进入 Agent 上下文，Runtime 尚未收到动作意图。"
+                    "Motion Gate 已关闭，攻击将在目标任务到达时直接进入执行器。"
+                    if unsafe_mode
+                    else (
+                        "攻击已进入 Agent 任务上下文，等待形成结构化动作意图。"
+                    )
                 ),
                 evidence={
                     "target_task_id": injection.get("target_task_id"),
                     "injection_id": injection.get("injection_id"),
+                    "execution_mode": line.get("execution_mode"),
                     "lease_issued": False,
                     "guard_invoked": False,
                     "executor_invoked": False,
                 },
-            )
-        elif attack_type == "model-hallucination":
-            result = self._run_hallucination_challenge(
-                challenge_id,
-                target_task_id,
             )
         else:
             result = self._run_guard_challenge(challenge_id, attack_type)
@@ -364,13 +475,105 @@ class DashboardBackend:
     def monitor_snapshot(self) -> dict[str, Any]:
         """Build the read-only security-observability surface."""
 
+        dashboard = self.snapshot()
+        self._reconcile_challenge_history(dashboard.get("line", {}))
         history = self.experience_challenges()
         return {
             "schema_version": "safeexec.monitor.v1",
             "generated_at_ms": int(time.time() * 1000),
-            "dashboard": self.snapshot(),
+            "dashboard": dashboard,
             "challenges": history["challenges"],
         }
+
+    def _reconcile_challenge_history(self, line: dict[str, Any]) -> None:
+        tasks = [
+            task
+            for task in [
+                *line.get("tasks", []),
+                *line.get("recent_tasks", []),
+            ]
+            if isinstance(task, dict)
+        ]
+        by_id = {
+            str(task.get("task_id")): task
+            for task in tasks
+            if task.get("task_id")
+        }
+        with self._experience_lock:
+            for challenge in self._experience_challenges:
+                if challenge.get("status") != "armed":
+                    continue
+                evidence = challenge.get("evidence")
+                if not isinstance(evidence, dict):
+                    continue
+                task = by_id.get(str(evidence.get("target_task_id")))
+                if task is None:
+                    continue
+                blocked = task.get("blocked_decision")
+                if isinstance(blocked, dict):
+                    recovered = task.get("status") == "COMPLETED"
+                    challenge.update(
+                        {
+                            "status": "recovered" if recovered else "blocked",
+                            "reason_code": blocked.get(
+                                "reason_code",
+                                "NO_MATCHING_GRANT",
+                            ),
+                            "physical_outcome": (
+                                "authorized-recovery"
+                                if recovered
+                                else "no-change"
+                            ),
+                            "detail": (
+                                "越权动作未获得执行权，污染会话已销毁，"
+                                "可信任务随后恢复。"
+                                if recovered
+                                else "越权动作未获得执行权。"
+                            ),
+                        }
+                    )
+                    evidence.update(
+                        {
+                            "intent": task.get("blocked_intent"),
+                            "decision": blocked,
+                            "executor_invoked": False,
+                            "recovered": recovered,
+                        }
+                    )
+                elif task.get("status") == "UNSAFE_EXECUTED":
+                    attack_type = str(challenge.get("attack_type"))
+                    challenge.update(
+                        {
+                            "status": "executed",
+                            "blocked_at": "bypassed",
+                            "reason_code": "SAFEEXEC_DISABLED",
+                            "physical_outcome": task.get(
+                                "attack_effect",
+                                "unexpected-action",
+                            ),
+                            "detail": {
+                                "prompt-injection": "目标样品被送入废弃区。",
+                                "model-hallucination": "目标样品被错误送入隔离区。",
+                                "intent-tampering": "另一件样品被替换为目标并送入废弃区。",
+                                "lease-replay": "旧复位命令被重放，整个批次意外回滚。",
+                            }.get(attack_type, "无保护动作已抵达执行器。"),
+                        }
+                    )
+                    evidence.update(
+                        {
+                            "intent": task.get("intent"),
+                            "attack_effect": task.get("attack_effect"),
+                            "replacement_sample_id": task.get(
+                                "attack_replacement_sample_id"
+                            ),
+                            "executor_invoked": True,
+                        }
+                    )
+                challenge["updated_at_ms"] = int(time.time() * 1000)
+            if self._experience_challenges:
+                self._latest_experience_challenge = json.loads(
+                    json.dumps(self._experience_challenges[-1])
+                )
 
     def _run_hallucination_challenge(
         self,
@@ -629,8 +832,12 @@ class DashboardBackend:
             f"{self.orchestrator_url}/v1/control/mode",
             method="POST",
             payload={"mode": mode},
-            headers={"X-Unsafe-Demo-Token": provided_token},
-            timeout=5,
+            headers={
+                "X-Unsafe-Demo-Token": (
+                    provided_token or self.unsafe_demo_token
+                )
+            },
+            timeout=160,
         )
 
     def configuration(self) -> dict[str, Any]:
@@ -761,6 +968,71 @@ class DashboardBackend:
         }
 
 
+class DemoRestoreSupervisor:
+    """Restore boot state and watch for authorization-only line failures."""
+
+    def __init__(
+        self,
+        backend: DashboardBackend,
+        *,
+        enabled: bool,
+        retry_seconds: float = 8.0,
+    ) -> None:
+        self.backend = backend
+        self.enabled = enabled
+        self.retry_seconds = max(1.0, retry_seconds)
+        self._thread: threading.Thread | None = None
+        self.last_result: dict[str, Any] | None = None
+        self.last_error: str | None = None
+
+    def start(self) -> None:
+        if not self.enabled or (
+            self._thread is not None and self._thread.is_alive()
+        ):
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name="motion-gate-demo-restore",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        boot_restore_pending = True
+        while True:
+            try:
+                should_restore = boot_restore_pending
+                if not boot_restore_pending:
+                    line = json_request(
+                        f"{self.backend.orchestrator_url}/v1/line/state",
+                        timeout=3,
+                    )
+                    error = line.get("last_error")
+                    error_code = (
+                        str(error.get("code"))
+                        if isinstance(error, dict)
+                        else ""
+                    )
+                    should_restore = (
+                        line.get("line_state") in {"STOPPED", "ERROR"}
+                        and error_code in DEMO_RECOVERABLE_ERRORS
+                        and not line.get("unsafe_recovery")
+                    )
+                if should_restore:
+                    result = self.backend.restore_demo(automatic=True)
+                    self.last_result = result
+                    self.last_error = None
+                    if result.get("status") in {
+                        "restored",
+                        "already-running",
+                        "operator-required",
+                    }:
+                        boot_restore_pending = False
+            except (UpstreamError, ConnectionError, RuntimeError) as exc:
+                self.last_error = str(exc)
+            time.sleep(self.retry_seconds)
+
+
 class DashboardServer(ThreadingHTTPServer):
     backend: DashboardBackend
 
@@ -829,6 +1101,9 @@ class Handler(BaseHTTPRequestHandler):
                         "continuous endpoint expects exactly one boolean field"
                     )
                 self._json(self.backend.set_continuous_mode(value["enabled"]))
+            elif parsed.path == "/api/demo/restore":
+                self._require_empty(self._body())
+                self._json(self.backend.restore_demo())
             elif parsed.path.startswith("/api/control/"):
                 self._require_empty(self._body())
                 action = parsed.path.rsplit("/", 1)[-1]
@@ -975,6 +1250,17 @@ def main() -> None:
         default=os.environ.get("SAFEEXEC_WORK_ORDER_FACT_MODE", "camera"),
         help="Attach camera Fact requirements or issue sensor-independent orders.",
     )
+    parser.add_argument(
+        "--unsafe-demo-token",
+        default=os.environ.get("SAFEEXEC_UNSAFE_DEMO_TOKEN", ""),
+        help="Server-side token used by the isolated experience A/B switch.",
+    )
+    parser.add_argument(
+        "--auto-restore-demo",
+        action="store_true",
+        default=os.environ.get("SAFEEXEC_DEMO_AUTORESTORE", "0") == "1",
+        help="After boot, restore and start only known-safe demo states.",
+    )
     args = parser.parse_args()
 
     issuer = None
@@ -991,7 +1277,13 @@ def main() -> None:
         guard_url=args.guard_url,
         work_order_issuer=issuer,
         work_order_fact_mode=args.work_order_fact_mode,
+        unsafe_demo_token=args.unsafe_demo_token,
     )
+    supervisor = DemoRestoreSupervisor(
+        server.backend,
+        enabled=args.auto_restore_demo,
+    )
+    supervisor.start()
     print(f"SafeExec Dashboard listening on http://{args.host}:{args.port}", flush=True)
     server.serve_forever()
 

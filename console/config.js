@@ -61,7 +61,7 @@ function render() {
   ui["config-line-state"].textContent = line.line_state || "UNKNOWN";
 
   const unsafe = line.execution_mode === "unsafe-baseline";
-  ui["path-chip"].textContent = unsafe ? "无保护对照" : "SafeExec";
+  ui["path-chip"].textContent = unsafe ? "无保护对照" : "Motion Gate";
   ui["path-chip"].classList.toggle("unsafe", unsafe);
   ui["path-description"].textContent = unsafe
     ? "Agent 动作绕过 Runtime、Lease 与 Guard，直接到达 Legacy Bridge。"
@@ -161,7 +161,7 @@ async function setExecutionMode(mode) {
     return;
   }
   if (unsafe && !window.confirm(
-    "无保护模式会让 Agent 动作绕过 SafeExec。确认仅用于隔离的 A/B 演示？"
+    "无保护模式会让 Agent 动作绕过 Motion Gate。确认仅用于隔离的 A/B 演示？"
   )) return;
   try {
     await request("/api/control/mode", {
@@ -171,7 +171,7 @@ async function setExecutionMode(mode) {
     });
     ui["unsafe-mode-token"].value = "";
     await loadConfiguration();
-    showNotice(unsafe ? "已切换到无保护对照" : "已恢复 SafeExec 保护");
+    showNotice(unsafe ? "已切换到无保护对照" : "已恢复 Motion Gate 保护");
   } catch (error) {
     showNotice(error.message, true);
   }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>SafeExec 可信配置</title>
+  <title>Motion Gate 可信配置</title>
   <link rel="stylesheet" href="/config.css">
 </head>
 <body>
@@ -12,11 +12,11 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">S</span>
       <div>
-        <p class="brand-context">SafeExec Control Plane</p>
+        <p class="brand-context">Motion Gate Control Plane</p>
         <h1>可信配置</h1>
       </div>
     </div>
-    <nav class="page-nav" aria-label="SafeExec 页面">
+    <nav class="page-nav" aria-label="Motion Gate 页面">
       <a href="/experience">互动体验</a>
       <a href="/monitor">安全观测墙</a>
       <a href="/config" aria-current="page">可信配置</a>
@@ -56,11 +56,11 @@
       <section class="execution-config" aria-labelledby="path-title">
         <div class="section-heading">
           <h2 id="path-title">演示执行路径</h2>
-          <span class="path-chip" id="path-chip">SafeExec</span>
+          <span class="path-chip" id="path-chip">Motion Gate</span>
         </div>
         <p id="path-description">动作经过 Runtime、一次性 Lease 与设备侧 Guard。</p>
         <div class="segmented-control" role="group" aria-label="选择执行路径">
-          <button id="protected-mode-btn" aria-pressed="true">启用 SafeExec</button>
+          <button id="protected-mode-btn" aria-pressed="true">启用 Motion Gate</button>
           <button id="unsafe-mode-btn" class="danger-choice" aria-pressed="false">无保护对照</button>
         </div>
         <label class="field compact-field">
@@ -104,7 +104,8 @@
               <select id="work-order-validity">
                 <option value="900000">15 分钟</option>
                 <option value="1800000">30 分钟</option>
-                <option value="3600000" selected>60 分钟</option>
+                <option value="3600000">60 分钟</option>
+                <option value="28800000" selected>8 小时（展览日）</option>
               </select>
             </label>
             <label class="field">

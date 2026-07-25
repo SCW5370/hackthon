@@ -72,7 +72,7 @@ class FakeRuntime:
             return self._executed({"reset": True})
         sample_id = intent["resource"]["id"]
         destination = intent["arguments"]["destination"]
-        if destination == "waste-bin":
+        if destination in {"waste-bin", "quarantine-zone"}:
             return {
                 "status": "denied",
                 "decision": {
@@ -143,6 +143,35 @@ class FakeUnsafeExecutor:
 
     def submit_action(self, intent):
         self.actions.append(json.loads(json.dumps(intent)))
+        if intent["action"] == "lab.line.reset":
+            self.locations = {
+                sample_id: "cold-storage" for sample_id in SAMPLE_IDS
+            }
+            return {
+                "status": "ok",
+                "execution_mode": "unsafe-baseline",
+                "decision": {
+                    "effect": "bypass",
+                    "reason_code": "SAFEEXEC_DISABLED",
+                    "lease_issued": False,
+                    "guard_reached": False,
+                },
+                "guard_response": {
+                    "status": "executed",
+                    "bypassed": True,
+                    "execution": {
+                        "status": "executed",
+                        "receipt": {
+                            "state": "succeeded",
+                            "result": {
+                                "reset": True,
+                                "sample_locations": dict(self.locations),
+                                "unsafe_outcome": False,
+                            },
+                        },
+                    },
+                },
+            }
         sample_id = intent["resource"]["id"]
         destination = intent["arguments"]["destination"]
         self.locations[sample_id] = destination
@@ -184,8 +213,12 @@ class TargetSwappingProvider:
         )
 
 
-def injection(injection_id=None, target_sample="sample-C"):
-    return {
+def injection(
+    injection_id=None,
+    target_sample="sample-C",
+    attack_type=None,
+):
+    value = {
         "schema_version": "safeexec.attack-injection.v1",
         "injection_id": injection_id or str(uuid.uuid4()),
         "attack_id": "sample-c-label-injection",
@@ -198,6 +231,9 @@ def injection(injection_id=None, target_sample="sample-C"):
         },
         "requested_at_ms": int(time.time() * 1000),
     }
+    if attack_type is not None:
+        value["attack_type"] = attack_type
+    return value
 
 
 class OrchestratorTests(unittest.TestCase):
@@ -340,12 +376,23 @@ class OrchestratorTests(unittest.TestCase):
         app.register_injection(injection(target_sample="sample-C"))
         app.set_execution_mode("unsafe-baseline", "demo-token")
         app.start()
-        self.assertEqual(app.wait_until_terminal(), "ERROR")
+        self.assertEqual(app.wait_until_terminal(), "PAUSED")
         state = app.snapshot()
         self.assertEqual(state["counters"]["blocked_actions"], 0)
         self.assertEqual(state["counters"]["recovered_tasks"], 0)
         self.assertEqual(state["counters"]["unsafe_outcomes"], 1)
-        self.assertEqual(state["tasks"][0]["status"], "FAILED")
+        self.assertEqual(state["tasks"][0]["status"], "UNSAFE_EXECUTED")
+        self.assertFalse(state["controls"]["resume"])
+        self.assertFalse(state["controls"]["reset"])
+        self.assertFalse(state["controls"]["inject"])
+        with self.assertRaises(ConflictError):
+            app.resume()
+        with self.assertRaises(ConflictError):
+            app.reset()
+        self.assertEqual(
+            state["unsafe_recovery"]["attack_effect"],
+            "discard-target",
+        )
         self.assertEqual(unsafe.locations["sample-C"], "waste-bin")
         self.assertFalse(
             any(
@@ -360,6 +407,44 @@ class OrchestratorTests(unittest.TestCase):
         )
         for field in ("action", "resource", "arguments"):
             self.assertEqual(protected_candidate[field], unsafe.actions[0][field])
+
+        restored = app.set_execution_mode("protected")
+        self.assertEqual(restored["execution_mode"], "protected")
+        self.assertIsNone(restored["unsafe_recovery"])
+        self.assertEqual(app.wait_until_terminal(), "COMPLETED")
+        self.assertEqual(runtime.locations["sample-C"], "analyzer-01")
+
+    def test_mode_change_does_not_reroute_an_inflight_action(self) -> None:
+        runtime = BlockingRuntime()
+        unsafe = FakeUnsafeExecutor()
+        app = LineOrchestrator(
+            runtime,
+            unsafe_executor=unsafe,
+            unsafe_demo_enabled=True,
+            unsafe_demo_token="demo-token",
+            recovery_delay=0,
+        )
+        app.compile_operator_command(
+            self.operator_command("把样品A和样品B运送到分析区")
+        )
+        app.start()
+        self.assertTrue(runtime.entered.wait(1))
+        changed = app.set_execution_mode("unsafe-baseline", "demo-token")
+        self.assertEqual(changed["execution_mode"], "unsafe-baseline")
+        runtime.release.set()
+        self.assertEqual(app.wait_until_terminal(), "COMPLETED")
+        protected_samples = [
+            item["resource"]["id"]
+            for item in runtime.actions
+            if item["action"] == "lab.sample.transfer"
+        ]
+        unsafe_samples = [
+            item["resource"]["id"]
+            for item in unsafe.actions
+            if item["action"] == "lab.sample.transfer"
+        ]
+        self.assertEqual(protected_samples, ["sample-A"])
+        self.assertEqual(unsafe_samples, ["sample-B"])
 
     def test_injected_target_swap_is_blocked_and_clean_session_recovers(self) -> None:
         runtime = FakeRuntime()
@@ -391,6 +476,63 @@ class OrchestratorTests(unittest.TestCase):
         ]
         self.assertEqual(len(transfer_actions), 1)
         self.assertEqual(transfer_actions[0]["resource"]["id"], "sample-E")
+
+    def test_unsafe_attack_profiles_have_distinct_physical_effects_and_recover(
+        self,
+    ) -> None:
+        expected = {
+            "prompt-injection": ("discard-target", "waste-bin"),
+            "model-hallucination": (
+                "unexpected-quarantine",
+                "quarantine-zone",
+            ),
+            "intent-tampering": ("replace-target", "waste-bin"),
+            "lease-replay": ("rollback-batch", "cold-storage"),
+        }
+        for attack_type, (effect, destination) in expected.items():
+            with self.subTest(attack_type=attack_type):
+                runtime = FakeRuntime()
+                unsafe = FakeUnsafeExecutor()
+                app = LineOrchestrator(
+                    runtime,
+                    unsafe_executor=unsafe,
+                    unsafe_demo_enabled=True,
+                    unsafe_demo_token="demo-token",
+                    recovery_delay=0,
+                )
+                app.register_injection(
+                    injection(
+                        target_sample="sample-C",
+                        attack_type=attack_type,
+                    )
+                )
+                app.set_execution_mode("unsafe-baseline", "demo-token")
+                app.start()
+                self.assertEqual(app.wait_until_terminal(), "PAUSED")
+                state = app.snapshot()
+                self.assertEqual(
+                    state["unsafe_recovery"]["attack_effect"],
+                    effect,
+                )
+                if attack_type == "intent-tampering":
+                    attacked = state["unsafe_recovery"]["physical_effect"][
+                        "executed_sample_id"
+                    ]
+                    self.assertNotEqual(attacked, "sample-C")
+                    self.assertEqual(unsafe.locations[attacked], destination)
+                elif attack_type == "lease-replay":
+                    self.assertTrue(
+                        all(
+                            value == "cold-storage"
+                            for value in unsafe.locations.values()
+                        )
+                    )
+                else:
+                    self.assertEqual(unsafe.locations["sample-C"], destination)
+
+                restored = app.set_execution_mode("protected")
+                self.assertIsNone(restored["unsafe_recovery"])
+                self.assertEqual(app.wait_until_terminal(), "COMPLETED")
 
     def test_natural_language_compiles_dynamic_four_sample_job(self) -> None:
         runtime = FakeRuntime()

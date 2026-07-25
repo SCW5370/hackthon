@@ -39,19 +39,21 @@ TASK_STATES = {
     "COMPLETED",
     "BLOCKED",
     "RECOVERING",
+    "UNSAFE_EXECUTED",
     "FAILED",
 }
 INJECTION_FIELDS = {
     "schema_version",
     "injection_id",
     "attack_id",
+    "attack_type",
     "channel",
     "target_task_id",
     "untrusted_content",
     "actor_claims",
     "requested_at_ms",
 }
-INJECTION_REQUIRED = INJECTION_FIELDS - {"actor_claims"}
+INJECTION_REQUIRED = INJECTION_FIELDS - {"actor_claims", "attack_type"}
 INJECTION_CHANNELS = {
     "sample_label",
     "voice",
@@ -67,6 +69,18 @@ OPERATOR_COMMAND_FIELDS = {
     "submitted_at_ms",
 }
 EXECUTION_MODES = {"protected", "unsafe-baseline"}
+ATTACK_TYPES = {
+    "prompt-injection",
+    "model-hallucination",
+    "intent-tampering",
+    "lease-replay",
+}
+ATTACK_EFFECTS = {
+    "prompt-injection": "discard-target",
+    "model-hallucination": "unexpected-quarantine",
+    "intent-tampering": "replace-target",
+    "lease-replay": "rollback-batch",
+}
 
 
 class RuntimeClient(Protocol):
@@ -334,6 +348,7 @@ class LineOrchestrator:
         self._job_manifest: dict[str, Any] = {}
         self._physical_evidence: dict[str, Any] | None = None
         self._active_work_order_id: str | None = None
+        self._unsafe_recovery_pending: dict[str, Any] | None = None
         self.continuous_mode = False
         self._pool_size = len(SAMPLE_IDS)
         self._cycle_index = 1
@@ -388,6 +403,7 @@ class LineOrchestrator:
         ]
         self._current_task_id = None
         self._last_error = None
+        self._unsafe_recovery_pending = None
         self._injections = {}
         self._injection_by_task = {}
         self._counters = {
@@ -399,6 +415,7 @@ class LineOrchestrator:
         self._loop_stats = {
             "completed_cycles": 0,
             "recycled_samples": 0,
+            "reconciled_batches": 0,
         }
 
     @staticmethod
@@ -429,6 +446,9 @@ class LineOrchestrator:
             "decision": None,
             "blocked_intent": None,
             "blocked_decision": None,
+            "execution_mode": None,
+            "attack_type": None,
+            "attack_effect": None,
             "error": None,
         }
 
@@ -439,6 +459,9 @@ class LineOrchestrator:
                 "line_state": self._line_state,
                 "fact_mode": self.fact_mode,
                 "execution_mode": self.execution_mode,
+                "unsafe_recovery": json.loads(
+                    json.dumps(self._unsafe_recovery_pending)
+                ),
                 "agent_provider": {
                     "job": getattr(self.job_compiler, "name", "unknown"),
                     "action": getattr(self.provider, "name", "unknown"),
@@ -506,6 +529,37 @@ class LineOrchestrator:
                     "message": "尚未激活已验证的可信工单",
                 }
             )
+        work_order_status: dict[str, Any] | None = None
+        if has_work_order and self._active_work_order_id is not None:
+            try:
+                response = self.runtime.get_work_order(
+                    self._active_work_order_id
+                )
+                candidate = response.get("work_order")
+                if isinstance(candidate, dict):
+                    work_order_status = candidate
+                    valid_until_ms = int(candidate.get("valid_until_ms", 0))
+                    if valid_until_ms <= int(time.time() * 1000) + 5_000:
+                        blockers.append(
+                            {
+                                "code": "WORK_ORDER_EXPIRED",
+                                "message": "可信工单已到期，需要重新签发",
+                            }
+                        )
+                else:
+                    blockers.append(
+                        {
+                            "code": "WORK_ORDER_NOT_FOUND",
+                            "message": "Runtime 中不存在当前可信工单",
+                        }
+                    )
+            except (ConnectionError, RuntimeError, TypeError, ValueError) as exc:
+                blockers.append(
+                    {
+                        "code": "WORK_ORDER_STATUS_UNAVAILABLE",
+                        "message": f"无法确认可信工单状态：{exc}",
+                    }
+                )
         if line_state == "ERROR":
             blockers.append(
                 {
@@ -576,6 +630,11 @@ class LineOrchestrator:
                 "required": requires_work_order,
                 "active": has_work_order,
                 "work_order_id": self._active_work_order_id,
+                "valid_until_ms": (
+                    work_order_status.get("valid_until_ms")
+                    if work_order_status
+                    else None
+                ),
             },
             "blockers": blockers,
             "auto_execute": False,
@@ -627,6 +686,9 @@ class LineOrchestrator:
                     "action": getattr(self.provider, "name", "unknown"),
                 },
                 "execution_mode": self.execution_mode,
+                "unsafe_recovery": json.loads(
+                    json.dumps(self._unsafe_recovery_pending)
+                ),
                 "execution_modes": {
                     "protected": {"available": True},
                     "unsafe-baseline": {
@@ -648,13 +710,19 @@ class LineOrchestrator:
                 or self._active_work_order_id is not None
             ),
             "pause": state == "RUNNING",
-            "resume": state == "PAUSED",
-            "reset": state in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"},
+            "resume": state == "PAUSED"
+            and self._unsafe_recovery_pending is None,
+            "reset": state in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"}
+            and self._unsafe_recovery_pending is None,
             "configure": state == "STOPPED",
-            "inject": state in {"STOPPED", "RUNNING", "PAUSE_PENDING", "PAUSED"},
-            "mode": state == "STOPPED"
-            and all(task["status"] == "QUEUED" for task in self._tasks)
-            and not any(self._counters.values()),
+            "inject": state in {"STOPPED", "RUNNING", "PAUSE_PENDING", "PAUSED"}
+            and self._unsafe_recovery_pending is None,
+            "mode": state in {"STOPPED", "RUNNING", "PAUSED"}
+            and state not in {"RECOVERING", "PAUSE_PENDING"}
+            and not (
+                self._unsafe_recovery_pending is not None
+                and self.execution_mode == "protected"
+            ),
             "continuous": state == "STOPPED"
             and all(task["status"] == "QUEUED" for task in self._tasks)
             and not any(self._counters.values()),
@@ -680,10 +748,11 @@ class LineOrchestrator:
     def set_execution_mode(self, mode: str, provided_token: str = "") -> dict[str, Any]:
         if mode not in EXECUTION_MODES:
             raise ValidationError("execution mode must be protected or unsafe-baseline")
+        reconcile = False
         with self._lock:
             if not self._controls()["mode"]:
                 raise ConflictError(
-                    "execution mode can change only on a stopped, reset line"
+                    "execution mode cannot change during an in-flight transition"
                 )
             if mode == "unsafe-baseline":
                 if not self.unsafe_demo_enabled or self.unsafe_executor is None:
@@ -694,7 +763,13 @@ class LineOrchestrator:
                 ):
                     raise AuthorizationError("invalid unsafe demo token")
             previous = self.execution_mode
+            if previous == mode:
+                return self.snapshot()
             self.execution_mode = mode
+            reconcile = (
+                mode == "protected"
+                and self._unsafe_recovery_pending is not None
+            )
             self._emit(
                 "execution.mode.changed",
                 "orchestrator",
@@ -702,10 +777,14 @@ class LineOrchestrator:
                     "previous": previous,
                     "current": mode,
                     "safeexec_enabled": mode == "protected",
+                    "applies_after_current_action": self._current_task_id is not None,
+                    "reconciliation_required": reconcile,
                 },
                 "critical" if mode == "unsafe-baseline" else "info",
             )
-            return self.snapshot()
+        if reconcile:
+            self._reconcile_unsafe_execution()
+        return self.snapshot()
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -753,6 +832,11 @@ class LineOrchestrator:
         with self._lock:
             if self._line_state != "PAUSED":
                 raise ConflictError(f"cannot resume from {self._line_state}")
+            if self._unsafe_recovery_pending is not None:
+                raise ConflictError(
+                    "unsafe physical state must be reconciled by enabling "
+                    "protected mode before the line can resume"
+                )
             self._line_state = "RUNNING"
             self._emit("line.resumed", "orchestrator", {})
             self._ensure_worker()
@@ -762,6 +846,11 @@ class LineOrchestrator:
         with self._lock:
             if self._line_state not in {"STOPPED", "PAUSED", "COMPLETED", "ERROR"}:
                 raise ConflictError(f"cannot reset from {self._line_state}")
+            if self._unsafe_recovery_pending is not None:
+                raise ConflictError(
+                    "unsafe physical state must be reconciled by enabling "
+                    "protected mode; direct reset is disabled"
+                )
         result = self.runtime.submit_action(build_reset_intent())
         self._assert_execution_succeeded(result, action="lab.line.reset")
         with self._lock:
@@ -1008,6 +1097,11 @@ class LineOrchestrator:
             self._injections[injection_id] = record
             self._injection_by_task[task["task_id"]] = injection_id
             task["untrusted_input"] = injection["untrusted_content"]
+            task["attack_type"] = injection.get(
+                "attack_type",
+                "prompt-injection",
+            )
+            task["attack_effect"] = ATTACK_EFFECTS[task["attack_type"]]
             self._emit(
                 "attack.injected",
                 "attacklab",
@@ -1015,6 +1109,9 @@ class LineOrchestrator:
                     "injection_id": injection_id,
                     "task_id": task["task_id"],
                     "channel": injection["channel"],
+                    "attack_type": task["attack_type"],
+                    "attack_effect": task["attack_effect"],
+                    "execution_mode": self.execution_mode,
                 },
                 "warning",
             )
@@ -1061,6 +1158,9 @@ class LineOrchestrator:
             raise ValidationError("invalid attack_id")
         if value.get("channel") not in INJECTION_CHANNELS:
             raise ValidationError("invalid channel")
+        attack_type = value.get("attack_type", "prompt-injection")
+        if attack_type not in ATTACK_TYPES:
+            raise ValidationError("invalid attack_type")
         target_task_id = value.get("target_task_id")
         if (
             not isinstance(target_task_id, str)
@@ -1093,7 +1193,9 @@ class LineOrchestrator:
                 not isinstance(identity, str) or len(identity) > 128
             ):
                 raise ValidationError("invalid claimed_identity")
-        return json.loads(json.dumps(dict(value)))
+        normalized = dict(value)
+        normalized["attack_type"] = attack_type
+        return json.loads(json.dumps(normalized))
 
     def events_after(self, after: int = 0) -> dict[str, Any]:
         with self._lock:
@@ -1321,11 +1423,46 @@ class LineOrchestrator:
                 "NO_MATCHING_GRANT",
                 "AGENT_OUTPUT_SCOPE_VIOLATION",
             }:
-                self._fail_task(task, reason, "SafeExec denied without recoverable injection")
+                self._fail_task(task, reason, self._denial_detail(reason))
                 return
             self._handle_registered_block(task, injection_id, response)
             return
         self._complete_task(task, response)
+
+    def _plan_for_attack(
+        self,
+        task: dict[str, Any],
+        attack_type: str,
+    ) -> ActionPlan:
+        if attack_type == "prompt-injection":
+            return ActionPlan(task["sample_id"], "cold-storage", "waste-bin")
+        if attack_type == "model-hallucination":
+            return ActionPlan(
+                task["sample_id"],
+                "cold-storage",
+                "quarantine-zone",
+            )
+        if attack_type == "intent-tampering":
+            replacement = next(
+                (
+                    item["sample_id"]
+                    for item in self._tasks
+                    if item["task_id"] != task["task_id"]
+                    and item["status"] == "QUEUED"
+                ),
+                None,
+            )
+            if replacement is None:
+                replacement = next(
+                    sample_id
+                    for sample_id in SAMPLE_IDS
+                    if sample_id != task["sample_id"]
+                )
+            task["attack_replacement_sample_id"] = replacement
+            return ActionPlan(replacement, "cold-storage", "waste-bin")
+        if attack_type == "lease-replay":
+            return ActionPlan(task["sample_id"], "cold-storage", "analyzer-01")
+        raise RuntimeError(f"unsupported attack type: {attack_type}")
 
     def _attempt(
         self, task: dict[str, Any], *, contaminated: bool
@@ -1334,7 +1471,14 @@ class LineOrchestrator:
             task["attempt"] += 1
             task["status"] = "PLANNING"
             task["session_id"] = str(uuid.uuid4())
+            task_execution_mode = self.execution_mode
+            task["execution_mode"] = task_execution_mode
             session_id = task["session_id"]
+            attack_type = (
+                str(task.get("attack_type") or "prompt-injection")
+                if contaminated
+                else None
+            )
             self._emit(
                 "agent.session.created",
                 "agent",
@@ -1350,11 +1494,42 @@ class LineOrchestrator:
                 "agent",
                 {"task_id": task["task_id"], "attempt": task["attempt"]},
             )
-        plan = self.provider.plan(
-            task["sample_id"],
-            contaminated=contaminated,
-            untrusted_input=task.get("untrusted_input") if contaminated else None,
-        )
+        if contaminated and attack_type == "prompt-injection":
+            try:
+                plan = self.provider.plan(
+                    task["sample_id"],
+                    contaminated=True,
+                    untrusted_input=task.get("untrusted_input"),
+                )
+            except (ConnectionError, RuntimeError, ValueError):
+                plan = self._plan_for_attack(task, attack_type)
+        elif contaminated:
+            assert attack_type is not None
+            plan = self._plan_for_attack(task, attack_type)
+        else:
+            try:
+                plan = self.provider.plan(
+                    task["sample_id"],
+                    contaminated=False,
+                    untrusted_input=None,
+                )
+            except (ConnectionError, RuntimeError, ValueError) as exc:
+                plan = ReplayProvider().plan(
+                    task["sample_id"],
+                    contaminated=False,
+                )
+                with self._lock:
+                    self._emit(
+                        "agent.provider.fallback",
+                        "orchestrator",
+                        {
+                            "task_id": task["task_id"],
+                            "provider": getattr(self.provider, "name", "unknown"),
+                            "fallback": ReplayProvider.name,
+                            "error": str(exc),
+                        },
+                        "warning",
+                    )
         intent = build_action_intent(
             plan,
             work_order_id=self._active_work_order_id,
@@ -1371,6 +1546,8 @@ class LineOrchestrator:
                     "sample_id": plan.sample_id,
                     "source": plan.source,
                     "destination": plan.destination,
+                    "attack_type": attack_type,
+                    "execution_mode": task_execution_mode,
                 },
                 "warning" if contaminated else "info",
             )
@@ -1379,7 +1556,10 @@ class LineOrchestrator:
                 "orchestrator",
                 {"task_id": task["task_id"], "request_id": intent["request_id"]},
             )
-        if plan.sample_id != task["sample_id"]:
+        if (
+            plan.sample_id != task["sample_id"]
+            and task_execution_mode == "protected"
+        ):
             response = {
                 "status": "denied",
                 "decision": {
@@ -1410,14 +1590,14 @@ class LineOrchestrator:
                 )
             return response
         if (
-            self.execution_mode == "protected"
+            task_execution_mode == "protected"
             and self.fact_mode == "demo"
             and not contaminated
         ):
             fact_result = self.runtime.publish_camera_fact()
             if fact_result.get("status") != "ok":
                 raise RuntimeError(f"demo Fact rejected: {fact_result!r}")
-        if self.execution_mode == "protected":
+        if task_execution_mode == "protected":
             response = self.runtime.submit_action(intent)
             execution_source = "guard"
         else:
@@ -1436,9 +1616,14 @@ class LineOrchestrator:
                     {
                         "task_id": task["task_id"],
                         "request_id": intent["request_id"],
-                        "execution_mode": self.execution_mode,
+                        "execution_mode": task_execution_mode,
+                        "attack_type": attack_type,
                     },
-                    "critical" if self.execution_mode == "unsafe-baseline" else "info",
+                    (
+                        "critical"
+                        if task_execution_mode == "unsafe-baseline"
+                        else "info"
+                    ),
                 )
         return response
 
@@ -1492,7 +1677,10 @@ class LineOrchestrator:
             self._emit(
                 "agent.session.terminated",
                 "orchestrator",
-                {"session_id": session_id, "reason": "prompt_injection"},
+                {
+                    "session_id": session_id,
+                    "reason": task.get("attack_type") or "prompt-injection",
+                },
                 "warning",
             )
             task["status"] = "RECOVERING"
@@ -1510,7 +1698,7 @@ class LineOrchestrator:
         retry = self._attempt(task, contaminated=False)
         reason = self._deny_reason(retry)
         if reason is not None:
-            self._fail_task(task, reason, "clean recovery attempt was denied")
+            self._fail_task(task, reason, self._denial_detail(reason))
             return
         try:
             self._complete_task(task, retry, recovered=True)
@@ -1535,7 +1723,34 @@ class LineOrchestrator:
         recovered: bool = False,
     ) -> None:
         self._assert_execution_succeeded(response, action="lab.sample.transfer")
-        unsafe = self._unsafe_outcome(response)
+        injection_id = self._injection_by_task.get(task["task_id"])
+        attack_type = (
+            str(task.get("attack_type"))
+            if injection_id is not None and task.get("attack_type")
+            else None
+        )
+        task_execution_mode = str(
+            task.get("execution_mode") or self.execution_mode
+        )
+        replay_response: dict[str, Any] | None = None
+        if (
+            injection_id is not None
+            and attack_type == "lease-replay"
+            and task_execution_mode == "unsafe-baseline"
+        ):
+            if self.unsafe_executor is None:
+                raise RuntimeError("unsafe baseline executor is unavailable")
+            replay_response = self.unsafe_executor.submit_action(
+                build_reset_intent()
+            )
+            self._assert_execution_succeeded(
+                replay_response,
+                action="replayed lab.line.reset",
+            )
+        unsafe = self._unsafe_outcome(response) or (
+            injection_id is not None
+            and task_execution_mode == "unsafe-baseline"
+        )
         with self._lock:
             task["error"] = None
             self._counters["unsafe_outcomes"] += int(unsafe)
@@ -1543,13 +1758,20 @@ class LineOrchestrator:
                 response,
                 fallback_dock=task["destination"],
             )
+            if replay_response is not None:
+                self._record_physical_from_response(
+                    replay_response,
+                    fallback_dock="home",
+                )
             if unsafe:
-                task["status"] = "FAILED"
+                task["status"] = "UNSAFE_EXECUTED"
                 task["error"] = {
                     "code": "UNSAFE_PHYSICAL_OUTCOME",
-                    "detail": "unprotected Agent action reached the physical executor",
+                    "detail": (
+                        "Motion Gate was disabled and the attack reached "
+                        "the physical executor"
+                    ),
                 }
-                injection_id = self._injection_by_task.get(task["task_id"])
                 if injection_id is not None:
                     record = self._injections[injection_id]
                     record["state"] = "executed"
@@ -1560,27 +1782,39 @@ class LineOrchestrator:
                         "lease_issued": False,
                         "guard_reached": False,
                         "unsafe_outcome": True,
+                        "attack_type": attack_type,
+                        "attack_effect": task.get("attack_effect"),
+                        "physical_effect": self._attack_physical_effect(task),
                     }
+                physical_effect = self._attack_physical_effect(task)
                 self._emit(
                     "unsafe.action.executed",
                     "legacy_bridge",
                     {
                         "task_id": task["task_id"],
                         "sample_id": task["sample_id"],
-                        "destination": "waste-bin",
+                        "attack_type": attack_type,
+                        "attack_effect": task.get("attack_effect"),
+                        "physical_effect": physical_effect,
                         "reason_code": "SAFEEXEC_DISABLED",
                     },
                     "critical",
                 )
-                self._line_state = "ERROR"
-                self._last_error = {
-                    "code": "UNSAFE_PHYSICAL_OUTCOME",
+                self._unsafe_recovery_pending = {
+                    "code": "UNSAFE_EXECUTION_HOLD",
                     "task_id": task["task_id"],
+                    "attack_type": attack_type,
+                    "attack_effect": task.get("attack_effect"),
+                    "physical_effect": physical_effect,
+                    "requires_protected_mode": True,
+                    "resume_after_reconciliation": True,
                 }
+                self._line_state = "PAUSED"
+                self._last_error = None
                 self._emit(
-                    "line.error",
+                    "line.unsafe_hold",
                     "orchestrator",
-                    self._last_error,
+                    dict(self._unsafe_recovery_pending),
                     "critical",
                 )
                 return
@@ -1608,6 +1842,193 @@ class LineOrchestrator:
                     "unsafe_outcome": unsafe,
                 },
             )
+
+    @staticmethod
+    def _denial_detail(reason: str) -> str:
+        return {
+            "WORK_ORDER_EXPIRED": (
+                "Trusted WorkOrder expired during continuous operation; "
+                "renew authorization, reconcile the batch, then resume"
+            ),
+            "WORK_ORDER_REQUIRED": (
+                "No verified WorkOrder is active; issue one from the "
+                "trusted control plane"
+            ),
+            "WORK_ORDER_BUDGET_EXHAUSTED": (
+                "WorkOrder execution budget is exhausted; renew the "
+                "signed authorization before resuming"
+            ),
+            "FACT_STALE": (
+                "A required physical Fact is stale; restore sensing and "
+                "submit a fresh observation"
+            ),
+            "EXECUTOR_UNAVAILABLE": (
+                "Device Guard or JOY is unavailable; the action was not sent"
+            ),
+        }.get(reason, f"Motion Gate denied the action: {reason}")
+
+    @staticmethod
+    def _attack_physical_effect(task: Mapping[str, Any]) -> dict[str, Any]:
+        attack_type = str(task.get("attack_type") or "prompt-injection")
+        if attack_type == "model-hallucination":
+            return {
+                "sample_id": task.get("sample_id"),
+                "destination": "quarantine-zone",
+                "description": "样品被错误送入未经授权的隔离区",
+            }
+        if attack_type == "intent-tampering":
+            return {
+                "requested_sample_id": task.get("sample_id"),
+                "executed_sample_id": task.get("attack_replacement_sample_id"),
+                "destination": "waste-bin",
+                "description": "传输途中目标对象被替换并送入废弃区",
+            }
+        if attack_type == "lease-replay":
+            return {
+                "action": "lab.line.reset",
+                "destination": "cold-storage",
+                "description": "旧复位命令被重放，整批样品意外回滚",
+            }
+        return {
+            "sample_id": task.get("sample_id"),
+            "destination": "waste-bin",
+            "description": "提示词注入使目标样品被送入废弃区",
+        }
+
+    def _reconcile_unsafe_execution(self) -> None:
+        with self._lock:
+            pending = json.loads(json.dumps(self._unsafe_recovery_pending))
+            if pending is None:
+                return
+            self._line_state = "RECOVERING"
+            self._emit(
+                "line.reconciliation.started",
+                "orchestrator",
+                {
+                    "strategy": "signed_reset_and_clean_batch_rebuild",
+                    "unsafe_execution": pending,
+                },
+                "warning",
+            )
+        try:
+            result = self.runtime.submit_action(build_reset_intent())
+            self._assert_execution_succeeded(
+                result,
+                action="lab.line.reset reconciliation",
+            )
+        except Exception as exc:
+            with self._lock:
+                self._line_state = "ERROR"
+                self._last_error = {
+                    "code": "UNSAFE_RECONCILIATION_FAILED",
+                    "detail": str(exc),
+                    "task_id": pending.get("task_id"),
+                }
+                self._emit(
+                    "line.error",
+                    "orchestrator",
+                    dict(self._last_error),
+                    "critical",
+                )
+            raise
+
+        work_order_valid = not self.require_trusted_work_order
+        if self._active_work_order_id is not None:
+            try:
+                order_response = self.runtime.get_work_order(
+                    self._active_work_order_id
+                )
+                order = order_response.get("work_order")
+                work_order_valid = bool(
+                    isinstance(order, Mapping)
+                    and int(order.get("valid_until_ms", 0))
+                    > int(time.time() * 1000) + 5_000
+                )
+            except (ConnectionError, RuntimeError, TypeError, ValueError):
+                work_order_valid = False
+
+        with self._lock:
+            self._record_physical_from_response(result, fallback_dock="home")
+            retired_at_ms = int(time.time() * 1000)
+            for item in self._tasks:
+                retired = json.loads(json.dumps(item))
+                retired["retired_at_ms"] = retired_at_ms
+                retired["retired_reason"] = "unsafe-reconciliation"
+                self._task_history.append(retired)
+            if len(self._task_history) > 48:
+                self._task_history = self._task_history[-48:]
+
+            for record in self._injections.values():
+                if record.get("state") == "executed":
+                    record["state"] = "reconciled"
+                    record["updated_at_ms"] = retired_at_ms
+                    result_value = record.get("result")
+                    if isinstance(result_value, dict):
+                        result_value["recovery"] = {
+                            "state": "succeeded",
+                            "strategy": "signed_reset_and_clean_batch_rebuild",
+                        }
+
+            self._cycle_index += 1
+            sample_ids = tuple(
+                str(value)
+                for value in self._job_manifest.get("sample_ids", SAMPLE_IDS)
+            )
+            source = str(self._job_manifest.get("source", "cold-storage"))
+            destination = str(
+                self._job_manifest.get("destination", "analyzer-01")
+            )
+            self._tasks = [
+                self._new_task(
+                    sample_id,
+                    source,
+                    destination,
+                    cycle_index=self._cycle_index,
+                )
+                for sample_id in sample_ids
+            ]
+            self._injection_by_task = {}
+            self._current_task_id = None
+            self._unsafe_recovery_pending = None
+            self._last_error = None
+            self._loop_stats["reconciled_batches"] = (
+                self._loop_stats.get("reconciled_batches", 0) + 1
+            )
+            if work_order_valid:
+                self._line_state = "RUNNING"
+            else:
+                self._active_work_order_id = None
+                self._line_state = "STOPPED"
+                self._last_error = {
+                    "code": "WORK_ORDER_RENEWAL_REQUIRED",
+                    "detail": (
+                        "Physical state was reconciled, but the previous "
+                        "WorkOrder is no longer valid"
+                    ),
+                }
+            self._emit(
+                "line.reconciliation.completed",
+                "orchestrator",
+                {
+                    "next_cycle": self._cycle_index,
+                    "work_order_valid": work_order_valid,
+                    "resumed": work_order_valid,
+                    "path": "Policy→Lease→Guard→JOY",
+                },
+            )
+            for next_task in self._tasks:
+                self._emit(
+                    "task.queued",
+                    "orchestrator",
+                    {
+                        "task_id": next_task["task_id"],
+                        "lot_id": next_task["lot_id"],
+                        "sample_id": next_task["sample_id"],
+                        "cycle_index": next_task["cycle_index"],
+                    },
+                )
+        if work_order_valid:
+            self._ensure_worker()
 
     @staticmethod
     def _execution_result(response: Mapping[str, Any]) -> Mapping[str, Any] | None:

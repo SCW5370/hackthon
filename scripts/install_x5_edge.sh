@@ -62,7 +62,17 @@ if [[ ! -f "${DASHBOARD_ENV}" ]]; then
   printf '%s\n' \
     'SAFEEXEC_GUARD_URL=http://30.201.220.34:8788' \
     'SAFEEXEC_WORK_ORDER_FACT_MODE=none' \
+    'SAFEEXEC_DEMO_AUTORESTORE=1' \
     >"${DASHBOARD_ENV}"
+fi
+if ! grep -q '^SAFEEXEC_DEMO_AUTORESTORE=' "${DASHBOARD_ENV}"; then
+  printf '%s\n' 'SAFEEXEC_DEMO_AUTORESTORE=1' >>"${DASHBOARD_ENV}"
+fi
+legacy_token_line="$(grep -m1 '^LAB_LEGACY_TOKEN=' "${ENV_FILE}" || true)"
+if [[ -n "${legacy_token_line}" ]] \
+  && ! grep -q '^SAFEEXEC_UNSAFE_DEMO_TOKEN=' "${DASHBOARD_ENV}"; then
+  printf 'SAFEEXEC_UNSAFE_DEMO_TOKEN=%s\n' \
+    "${legacy_token_line#LAB_LEGACY_TOKEN=}" >>"${DASHBOARD_ENV}"
 fi
 chown root:root "${DASHBOARD_ENV}"
 chmod 0600 "${DASHBOARD_ENV}"

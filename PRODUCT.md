@@ -1,14 +1,14 @@
-# SafeExec 产品上下文
+# Motion Gate 产品上下文
 
 ## 产品定位
 
-SafeExec 是位于具身 Agent 与真实设备之间的零信任执行 Runtime。它不负责替代业务 Agent，而是把 Agent 生成的动作意图与可信工单、实时事实和一次性执行凭证进行核对，确保被提示词注入污染的 Agent 也不能执行未授权的物理动作。
+Motion Gate 是位于具身 Agent 与真实设备之间的零信任执行 Runtime。它不负责替代业务 Agent，而是把 Agent 生成的动作意图与可信工单、实时事实和一次性执行凭证进行核对，确保被提示词注入污染的 Agent 也不能执行未授权的物理动作。
 
 ## 当前演示
 
-操作员用自然语言指定样品数量或对象，Agent 通过 Function Calling 生成不可变 JobManifest 并建立动态队列。运行过程中，任意尚未执行的样品都可能携带不可信标签，污染会话会提出“移入废弃区”的恶意动作。SafeExec 拒绝签发 Lease，Orchestrator 销毁污染会话、从可信工单创建干净会话并继续任务。
+操作员用自然语言指定样品数量或对象，Agent 通过 Function Calling 生成不可变 JobManifest 并建立动态队列。运行过程中，任意尚未执行的样品都可能携带不可信标签，污染会话会提出“移入废弃区”的恶意动作。Motion Gate 拒绝签发 Lease，Orchestrator 销毁污染会话、从可信工单创建干净会话并继续任务。
 
-参考部署中，业务 Agent、Orchestrator、SafeExec Runtime 和管理 Web 服务
+参考部署中，业务 Agent、Orchestrator、Motion Gate Runtime 和管理 Web 服务
 真实运行在 RDK X5；Mac 是只运行浏览器的管理终端；Windows 只承担设备侧
 Guard、JOY 适配器和机械臂数字孪生。Agent、Runtime 与可信控制面使用不同
 系统账号，Agent 无权读取 Lease 或 WorkOrder 私钥。
@@ -21,7 +21,7 @@ Guard、JOY 适配器和机械臂数字孪生。Agent、Runtime 与可信控制�
 
 ## 核心体验
 
-用户应在一个屏幕内提交自然语言目标，并看清“Function Call、可信工单、不可信输入、Agent 实际意图、SafeExec 决策、物理结果和恢复过程”之间的因果链。演示的核心不是按钮触发一次动作，而是一条会动态规划、持续工作、能被攻击、能阻断并自愈的自主生产线。
+用户应在一个屏幕内提交自然语言目标，并看清“Function Call、可信工单、不可信输入、Agent 实际意图、Motion Gate 决策、物理结果和恢复过程”之间的因果链。演示的核心不是按钮触发一次动作，而是一条会动态规划、持续工作、能被攻击、能阻断并自愈的自主生产线。
 
 ## 品牌人格
 

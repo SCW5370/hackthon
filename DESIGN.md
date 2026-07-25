@@ -1,5 +1,5 @@
 ---
-name: SafeExec Operations Console
+name: Motion Gate Operations Console
 description: Evidence-first control surface for an autonomous laboratory line
 colors:
   canvas: "#F4F6F2"
@@ -64,13 +64,13 @@ components:
     padding: "16px"
 ---
 
-# Design System: SafeExec Operations Console
+# Design System: Motion Gate Operations Console
 
 ## Overview
 
 **Creative North Star: "The Evidence Desk"**
 
-SafeExec should feel like a calm laboratory duty desk where every physical action has a visible cause, authorization decision, and consequence. Information is dense enough for a live demonstration but grouped by operator question rather than system component.
+Motion Gate should feel like a calm laboratory duty desk where every physical action has a visible cause, authorization decision, and consequence. Information is dense enough for a live demonstration but grouped by operator question rather than system component.
 
 The design explicitly rejects the current neon cyberpunk treatment, decorative scanlines, and polling-driven flicker. Security is communicated through precise state changes and durable evidence, not visual noise.
 
@@ -91,7 +91,7 @@ The palette uses laboratory paper neutrals with measured semantic colors.
 
 ### Secondary
 
-- **Decision Blue** (`#2459A9`): SafeExec evaluation and informational state.
+- **Decision Blue** (`#2459A9`): Motion Gate evaluation and informational state.
 
 ### Tertiary
 
@@ -177,7 +177,7 @@ The header is a compact persistent control strip. Audit and unsafe baseline tool
 
 ### Causal Trace
 
-Trusted work order, untrusted input, Agent intent, SafeExec decision, and recovery are five stable rows. A state update changes only the relevant row and never clears the trace.
+Trusted work order, untrusted input, Agent intent, Motion Gate decision, and recovery are five stable rows. A state update changes only the relevant row and never clears the trace.
 
 ## Do's and Don'ts
 

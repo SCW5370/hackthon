@@ -3,7 +3,11 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from dev.dashboard_server import DashboardBackend, UpstreamError
+from dev.dashboard_server import (
+    DashboardBackend,
+    DemoRestoreSupervisor,
+    UpstreamError,
+)
 from runtime.lease_authority import LeaseAuthority
 from runtime.work_orders import WorkOrder, WorkOrderIssuer
 
@@ -136,8 +140,160 @@ class DashboardServerTests(unittest.TestCase):
             method="POST",
             payload={"mode": "unsafe-baseline"},
             headers={"X-Unsafe-Demo-Token": "demo-token"},
-            timeout=5,
+            timeout=160,
         )
+
+    def test_server_side_demo_token_supports_experience_toggle(self) -> None:
+        backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
+            runtime_url="http://runtime",
+            guard_url="http://guard",
+            unsafe_demo_token="server-demo-token",
+        )
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value={"execution_mode": "unsafe-baseline"},
+        ) as mocked:
+            backend.set_execution_mode("unsafe-baseline", "")
+        self.assertEqual(
+            mocked.call_args.kwargs["headers"]["X-Unsafe-Demo-Token"],
+            "server-demo-token",
+        )
+
+    def test_restore_demo_resets_signs_configures_and_starts_atomically(
+        self,
+    ) -> None:
+        private_key, _ = LeaseAuthority.generate_keypair()
+        backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
+            runtime_url="http://runtime",
+            guard_url="http://guard",
+            work_order_issuer=WorkOrderIssuer(private_key),
+        )
+        with (
+            patch(
+                "dev.dashboard_server.json_request",
+                return_value={
+                    "line_state": "ERROR",
+                    "last_error": {"code": "WORK_ORDER_EXPIRED"},
+                    "unsafe_recovery": None,
+                },
+            ),
+            patch.object(
+                backend,
+                "control",
+                side_effect=[
+                    {"line_state": "STOPPED"},
+                    {"line_state": "RUNNING"},
+                ],
+            ) as control,
+            patch.object(
+                backend,
+                "issue_work_order",
+                return_value={
+                    "work_order": {"work_order_id": "restored-order"}
+                },
+            ) as issue,
+            patch.object(
+                backend,
+                "set_continuous_mode",
+                return_value={"continuous_mode": True},
+            ) as continuous,
+        ):
+            result = backend.restore_demo()
+        self.assertEqual(result["status"], "restored")
+        self.assertEqual(
+            [call.args[0] for call in control.call_args_list],
+            ["reset", "start"],
+        )
+        draft = issue.call_args.args[0]
+        self.assertEqual(draft["valid_for_ms"], 8 * 60 * 60 * 1000)
+        self.assertEqual(draft["max_executions_per_sample"], 10_000)
+        continuous.assert_called_once_with(True)
+
+    def test_automatic_restore_does_not_reconcile_unknown_outcome(self) -> None:
+        private_key, _ = LeaseAuthority.generate_keypair()
+        backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
+            runtime_url="http://runtime",
+            guard_url="http://guard",
+            work_order_issuer=WorkOrderIssuer(private_key),
+        )
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value={
+                "line_state": "ERROR",
+                "last_error": {"code": "EXECUTION_OUTCOME_UNKNOWN"},
+                "unsafe_recovery": None,
+            },
+        ):
+            result = backend.restore_demo(automatic=True)
+        self.assertEqual(result["status"], "operator-required")
+        self.assertEqual(
+            result["reason_code"],
+            "EXECUTION_OUTCOME_UNKNOWN",
+        )
+
+    def test_restore_supervisor_repairs_later_work_order_expiry(self) -> None:
+        supervisor = DemoRestoreSupervisor(
+            self.backend,
+            enabled=True,
+            retry_seconds=1,
+        )
+        with (
+            patch.object(
+                self.backend,
+                "restore_demo",
+                side_effect=[
+                    {"status": "already-running"},
+                    {"status": "restored"},
+                ],
+            ) as restore,
+            patch(
+                "dev.dashboard_server.json_request",
+                return_value={
+                    "line_state": "ERROR",
+                    "last_error": {"code": "WORK_ORDER_EXPIRED"},
+                    "unsafe_recovery": None,
+                },
+            ),
+            patch(
+                "dev.dashboard_server.time.sleep",
+                side_effect=[None, KeyboardInterrupt],
+            ),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                supervisor._run()
+        self.assertEqual(restore.call_count, 2)
+
+    def test_restore_supervisor_preserves_operator_pause(self) -> None:
+        supervisor = DemoRestoreSupervisor(
+            self.backend,
+            enabled=True,
+            retry_seconds=1,
+        )
+        with (
+            patch.object(
+                self.backend,
+                "restore_demo",
+                return_value={"status": "already-running"},
+            ) as restore,
+            patch(
+                "dev.dashboard_server.json_request",
+                return_value={
+                    "line_state": "PAUSED",
+                    "last_error": None,
+                    "unsafe_recovery": None,
+                },
+            ),
+            patch(
+                "dev.dashboard_server.time.sleep",
+                side_effect=[None, KeyboardInterrupt],
+            ),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                supervisor._run()
+        restore.assert_called_once_with(automatic=True)
 
     def test_untrusted_content_is_rendered_with_text_content_only(self) -> None:
         for file_name in ("experience.js", "monitor.js"):
@@ -153,7 +309,7 @@ class DashboardServerTests(unittest.TestCase):
     def test_exhibition_experience_is_a_separate_safe_surface(self) -> None:
         experience = Path("console/experience.html").read_text(encoding="utf-8")
         script = Path("console/experience.js").read_text(encoding="utf-8")
-        self.assertIn("ActionGate", experience)
+        self.assertIn("Motion Gate", experience)
         self.assertIn("选择一种越权路径", experience)
         self.assertIn('id="system-drawer"', experience)
         self.assertIn('id="evidence-drawer"', experience)
@@ -249,45 +405,39 @@ class DashboardServerTests(unittest.TestCase):
             mocked.call_args.args,
         )
 
-    def test_prompt_injection_challenge_refuses_unsafe_baseline(self) -> None:
+    def test_prompt_injection_challenge_runs_through_unsafe_baseline(self) -> None:
         with patch(
             "dev.dashboard_server.json_request",
-            return_value={"execution_mode": "unsafe-baseline"},
-        ):
-            with self.assertRaises(UpstreamError) as raised:
-                self.backend.experience_challenge(
-                    self._challenge("prompt-injection")
-                )
-        self.assertEqual(raised.exception.status, 409)
+            side_effect=[
+                {"execution_mode": "unsafe-baseline"},
+                {
+                    "accepted": True,
+                    "injection_id": "unsafe-injection",
+                    "target_task_id": "task-sample-C",
+                },
+            ],
+        ) as mocked:
+            result = self.backend.experience_challenge(
+                self._challenge("prompt-injection")
+            )
+        self.assertEqual(result["status"], "armed")
+        self.assertEqual(result["blocked_at"], "bypassed")
+        payload = mocked.call_args.kwargs["payload"]
+        self.assertEqual(payload["attack_type"], "prompt-injection")
+        self.assertEqual(payload["target_task_id"], "task-sample-C")
 
-    def test_hallucination_challenge_reaches_live_runtime_and_fails_closed(
+    def test_hallucination_challenge_arms_live_orchestrator_recovery_path(
         self,
     ) -> None:
-        line = {
-            "active_work_order_id": str(uuid.uuid4()),
-            "tasks": [
-                {
-                    "task_id": "task-sample-C",
-                    "sample_id": "sample-C",
-                    "status": "QUEUED",
-                }
-            ],
-        }
-
         def response(url, **kwargs):
             if url == "http://orchestrator/v1/line/state":
-                return line
-            if url == "http://runtime/v1/actions":
-                self.assertEqual(
-                    kwargs["payload"]["arguments"]["destination"],
-                    "quarantine-zone",
-                )
+                return {"execution_mode": "protected"}
+            if url == "http://orchestrator/v1/testing/injections":
+                self.assertEqual(kwargs["payload"]["attack_type"], "model-hallucination")
                 return {
-                    "status": "denied",
-                    "decision": {
-                        "effect": "deny",
-                        "reason_code": "NO_MATCHING_GRANT",
-                    },
+                    "accepted": True,
+                    "injection_id": kwargs["payload"]["injection_id"],
+                    "target_task_id": "task-sample-C",
                 }
             raise AssertionError(url)
 
@@ -295,18 +445,22 @@ class DashboardServerTests(unittest.TestCase):
             result = self.backend.experience_challenge(
                 self._challenge("model-hallucination")
             )
-        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["status"], "armed")
         self.assertEqual(result["blocked_at"], "runtime")
-        self.assertEqual(result["reason_code"], "NO_MATCHING_GRANT")
+        self.assertEqual(result["reason_code"], "AWAITING_AGENT_INTENT")
         self.assertFalse(result["evidence"]["guard_invoked"])
 
     def test_guard_challenges_use_hash_binding_and_replay_store(self) -> None:
-        tamper = self.backend.experience_challenge(
-            self._challenge("intent-tampering")
-        )
-        replay = self.backend.experience_challenge(
-            self._challenge("lease-replay")
-        )
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value={"execution_mode": "protected"},
+        ):
+            tamper = self.backend.experience_challenge(
+                self._challenge("intent-tampering")
+            )
+            replay = self.backend.experience_challenge(
+                self._challenge("lease-replay")
+            )
         self.assertEqual(tamper["reason_code"], "REQUEST_HASH_MISMATCH")
         self.assertEqual(replay["reason_code"], "LEASE_ALREADY_CONSUMED")
         self.assertEqual(tamper["blocked_at"], "guard")
