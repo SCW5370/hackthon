@@ -17,7 +17,6 @@ from biolab.catalog import SAMPLE_IDS
 from lab_agent.contracts import (
     ActionPlan,
     build_action_intent,
-    build_recycle_intent,
     build_reset_intent,
 )
 from .job_compiler import DeterministicJobCompiler
@@ -608,10 +607,14 @@ class LineOrchestrator:
                 "loop_stats": dict(self._loop_stats),
                 "continuous_mode": self.continuous_mode,
                 "entity_pool": {
-                    "strategy": "fixed-physical-pool",
+                    "strategy": "batch-turnover",
                     "size": self._pool_size,
                     "active_cycle": self._cycle_index,
                     "recycled_in_cycle": self._cycle_recycled,
+                    "processed_in_cycle": sum(
+                        item["status"] == "COMPLETED"
+                        for item in self._tasks
+                    ),
                 },
                 "physical_evidence": json.loads(
                     json.dumps(self._physical_evidence)
@@ -1135,19 +1138,54 @@ class LineOrchestrator:
                     (item for item in self._tasks if item["status"] == "QUEUED"),
                     None,
                 )
+                batch_ready = bool(
+                    task is None
+                    and self.continuous_mode
+                    and self._tasks
+                    and all(
+                        item["status"] == "COMPLETED"
+                        for item in self._tasks
+                    )
+                )
+                batch_anchor = self._tasks[-1] if batch_ready else None
                 if task is None:
-                    self._line_state = "COMPLETED"
-                    self._emit(
-                        "line.completed",
-                        "orchestrator",
-                        {
-                            "job_id": self._job_manifest["job_id"],
-                            "task_count": len(self._tasks),
-                            "counters": dict(self._counters),
-                        },
+                    if batch_ready:
+                        self._current_task_id = None
+                    else:
+                        self._line_state = "COMPLETED"
+                        self._emit(
+                            "line.completed",
+                            "orchestrator",
+                            {
+                                "job_id": self._job_manifest["job_id"],
+                                "task_count": len(self._tasks),
+                                "counters": dict(self._counters),
+                            },
+                        )
+                        return
+                else:
+                    self._current_task_id = task["task_id"]
+            if batch_ready:
+                try:
+                    self._refresh_completed_batch()
+                except ExecutionOutcomeUncertainError as exc:
+                    assert batch_anchor is not None
+                    self._fail_task(
+                        batch_anchor,
+                        "BATCH_REFRESH_OUTCOME_UNKNOWN",
+                        str(exc),
                     )
                     return
-                self._current_task_id = task["task_id"]
+                except Exception as exc:
+                    assert batch_anchor is not None
+                    self._fail_task(
+                        batch_anchor,
+                        "BATCH_REFRESH_FAILURE",
+                        str(exc),
+                    )
+                    return
+                continue
+            assert task is not None
             try:
                 self._process_task(task)
             except ExecutionOutcomeUncertainError as exc:
@@ -1161,25 +1199,6 @@ class LineOrchestrator:
                 self._fail_task(task, "ORCHESTRATOR_FAILURE", str(exc))
                 return
             with self._lock:
-                if self._line_state == "ERROR":
-                    return
-                should_recycle = (
-                    self.continuous_mode and task["status"] == "COMPLETED"
-                )
-            if should_recycle:
-                try:
-                    self._recycle_and_requeue(task)
-                except ExecutionOutcomeUncertainError as exc:
-                    self._fail_task(
-                        task,
-                        "RECYCLE_OUTCOME_UNKNOWN",
-                        str(exc),
-                    )
-                    return
-                except Exception as exc:
-                    self._fail_task(task, "RECYCLE_FAILURE", str(exc))
-                    return
-            with self._lock:
                 self._current_task_id = None
                 if self._line_state == "ERROR":
                     return
@@ -1192,82 +1211,105 @@ class LineOrchestrator:
                     )
                     return
 
-    def _recycle_and_requeue(self, task: dict[str, Any]) -> None:
-        """Recycle one physical carrier, then append its next logical lot."""
+    def _refresh_completed_batch(self) -> None:
+        """Retire a complete batch atomically, then queue its successor."""
 
-        if self.recycle_delay:
-            self._sleep(self.recycle_delay)
-        sample_id = str(task["sample_id"])
         with self._lock:
+            completed_batch = [
+                item for item in self._tasks
+                if item["status"] == "COMPLETED"
+            ]
+            if (
+                not completed_batch
+                or len(completed_batch) != len(self._tasks)
+            ):
+                raise RuntimeError(
+                    "batch refresh requires every active task to be completed"
+                )
+            completed_cycle = self._cycle_index
             self._emit(
-                "sample.retiring",
+                "line.batch.completed",
                 "orchestrator",
                 {
-                    "task_id": task["task_id"],
-                    "lot_id": task["lot_id"],
-                    "sample_id": sample_id,
-                    "from": "analyzer-01",
+                    "cycle_index": completed_cycle,
+                    "sample_count": len(completed_batch),
+                    "completed_tasks": self._counters["completed_tasks"],
+                    "hold_ms": int(self.recycle_delay * 1000),
                 },
             )
-        result = self.runtime.submit_action(build_recycle_intent(sample_id))
-        self._assert_execution_succeeded(result, action="lab.sample.recycle")
+        if self.recycle_delay:
+            self._sleep(self.recycle_delay)
         with self._lock:
-            self._record_physical_from_response(
-                result,
-                fallback_dock="analyzer-01",
+            self._emit(
+                "line.batch.refreshing",
+                "orchestrator",
+                {
+                    "cycle_index": completed_cycle,
+                    "sample_ids": [
+                        item["sample_id"] for item in completed_batch
+                    ],
+                    "path": "Policy→Lease→Guard→JOY",
+                },
             )
-            completed = json.loads(json.dumps(task))
-            completed["retired_at_ms"] = int(time.time() * 1000)
-            self._task_history.append(completed)
+        result = self.runtime.submit_action(build_reset_intent())
+        self._assert_execution_succeeded(result, action="lab.line.reset")
+        with self._lock:
+            self._record_physical_from_response(result, fallback_dock="home")
+            retired_at_ms = int(time.time() * 1000)
+            for item in completed_batch:
+                completed = json.loads(json.dumps(item))
+                completed["retired_at_ms"] = retired_at_ms
+                completed["retired_with_batch"] = completed_cycle
+                self._task_history.append(completed)
+                self._injection_by_task.pop(str(item["task_id"]), None)
             if len(self._task_history) > 48:
                 self._task_history = self._task_history[-48:]
-            self._tasks = [item for item in self._tasks if item is not task]
-            old_task_id = str(task["task_id"])
-            self._injection_by_task.pop(old_task_id, None)
-            self._loop_stats["recycled_samples"] += 1
-            self._cycle_recycled += 1
+
+            self._loop_stats["recycled_samples"] += len(completed_batch)
+            self._loop_stats["completed_cycles"] += 1
+            self._cycle_index += 1
+            self._cycle_recycled = 0
+            next_tasks = [
+                self._new_task(
+                    str(item["sample_id"]),
+                    str(item["source"]),
+                    str(item["destination"]),
+                    cycle_index=self._cycle_index,
+                )
+                for item in completed_batch
+            ]
+            self._tasks = next_tasks
             self._emit(
-                "sample.recycled",
+                "line.batch.refreshed",
                 "guard",
                 {
-                    "task_id": old_task_id,
-                    "lot_id": task["lot_id"],
-                    "sample_id": sample_id,
+                    "completed_cycle": completed_cycle,
+                    "next_cycle": self._cycle_index,
+                    "sample_count": len(next_tasks),
                     "destination": "cold-storage",
                     "path": "Policy→Lease→Guard→JOY",
                 },
             )
-            if self._cycle_recycled >= self._pool_size:
-                completed_cycle = self._cycle_index
-                self._loop_stats["completed_cycles"] += 1
-                self._cycle_index += 1
-                self._cycle_recycled = 0
-                self._emit(
-                    "line.cycle.completed",
-                    "orchestrator",
-                    {
-                        "cycle_index": completed_cycle,
-                        "completed_tasks": self._counters["completed_tasks"],
-                        "unsafe_outcomes": self._counters["unsafe_outcomes"],
-                    },
-                )
-            next_task = self._new_task(
-                sample_id,
-                str(task["source"]),
-                str(task["destination"]),
-                cycle_index=int(task["cycle_index"]) + 1,
-            )
-            self._tasks.append(next_task)
             self._emit(
-                "task.queued",
+                "line.cycle.completed",
                 "orchestrator",
                 {
-                    "task_id": next_task["task_id"],
-                    "lot_id": next_task["lot_id"],
-                    "sample_id": sample_id,
-                    "cycle_index": next_task["cycle_index"],
+                    "cycle_index": completed_cycle,
+                    "completed_tasks": self._counters["completed_tasks"],
+                    "unsafe_outcomes": self._counters["unsafe_outcomes"],
                 },
             )
+            for next_task in next_tasks:
+                self._emit(
+                    "task.queued",
+                    "orchestrator",
+                    {
+                        "task_id": next_task["task_id"],
+                        "lot_id": next_task["lot_id"],
+                        "sample_id": next_task["sample_id"],
+                        "cycle_index": next_task["cycle_index"],
+                    },
+                )
 
     def _process_task(self, task: dict[str, Any]) -> None:
         injection_id = self._injection_by_task.get(task["task_id"])

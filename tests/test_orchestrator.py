@@ -229,36 +229,44 @@ class OrchestratorTests(unittest.TestCase):
             {sample_id: "analyzer-01" for sample_id in SAMPLE_IDS},
         )
 
-    def test_continuous_mode_recycles_fixed_entity_pool(self) -> None:
+    def test_continuous_mode_refreshes_only_after_complete_batch(self) -> None:
         runtime = FakeRuntime()
         app = LineOrchestrator(runtime, recovery_delay=0, recycle_delay=0.01)
-        app.compile_operator_command(
-            self.operator_command("运送 sample-A 到分析区")
-        )
         configured = app.set_continuous_mode(True)
         self.assertTrue(configured["continuous_mode"])
         app.start()
         deadline = time.monotonic() + 2
-        while app.snapshot()["counters"]["completed_tasks"] < 2:
+        while app.snapshot()["loop_stats"]["completed_cycles"] < 1:
             if time.monotonic() >= deadline:
-                self.fail("continuous line did not complete two logical lots")
+                self.fail("continuous line did not refresh the completed batch")
             time.sleep(0.005)
         app.pause()
         self.assertEqual(app.wait_until_terminal(), "PAUSED")
         state = app.snapshot()
-        self.assertGreaterEqual(state["loop_stats"]["recycled_samples"], 2)
-        self.assertGreaterEqual(state["loop_stats"]["completed_cycles"], 2)
+        self.assertGreaterEqual(state["loop_stats"]["recycled_samples"], 6)
+        self.assertGreaterEqual(state["loop_stats"]["completed_cycles"], 1)
         self.assertTrue(state["recent_tasks"])
         self.assertTrue(
             any(
-                action["action"] == "lab.sample.recycle"
+                action["action"] == "lab.line.reset"
                 for action in runtime.actions
             )
         )
-        self.assertEqual(
-            state["physical_evidence"]["sample_locations"]["sample-A"],
-            "cold-storage",
+        first_reset = next(
+            index
+            for index, action in enumerate(runtime.actions)
+            if action["action"] == "lab.line.reset"
         )
+        self.assertEqual(
+            [
+                action["action"]
+                for action in runtime.actions[:first_reset]
+            ],
+            ["lab.sample.transfer"] * 6,
+        )
+        self.assertGreaterEqual(runtime.reset_count, 1)
+        self.assertEqual(state["entity_pool"]["strategy"], "batch-turnover")
+        self.assertGreaterEqual(state["entity_pool"]["active_cycle"], 2)
 
     def test_verified_work_order_is_required_and_bound_to_every_intent(self) -> None:
         runtime = FakeRuntime()

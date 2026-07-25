@@ -189,7 +189,12 @@ def main() -> None:
     )
     parser.add_argument("--fact-mode", choices=("demo", "external"), default="demo")
     parser.add_argument("--recovery-delay", type=float, default=1.5)
-    parser.add_argument("--recycle-delay", type=float, default=1.0)
+    parser.add_argument(
+        "--recycle-delay",
+        type=float,
+        default=2.0,
+        help="seconds to hold a completed batch before signed turnover",
+    )
     parser.add_argument("--enable-testing", action="store_true")
     parser.add_argument(
         "--agent-provider",
