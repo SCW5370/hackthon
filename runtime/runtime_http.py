@@ -379,7 +379,10 @@ class SafeExecRuntime:
         finally:
             if discovery is not None:
                 discovery.set_executing(False)
-                discovery.refresh()
+                # Do not return a successful long-running action while the
+                # discovery cache still reflects timeouts observed during that
+                # action. The next task may be dispatched immediately.
+                discovery.refresh(blocking=True)
 
     def add_fact(self, fact_dict: dict) -> dict:
         """添加或更新 Fact"""

@@ -94,8 +94,15 @@ class GuardEndpointDiscovery:
         with self._lock:
             self._executing = value
 
-    def refresh(self) -> dict[str, Any]:
-        if not self._refresh_lock.acquire(blocking=False):
+    def refresh(self, *, blocking: bool = False) -> dict[str, Any]:
+        """Refresh readiness.
+
+        Background polling stays non-blocking so overlapping timer ticks do not
+        accumulate. Callers on the physical execution path can request a
+        blocking refresh to avoid failing closed on a stale unavailable cache
+        while another probe is just finishing.
+        """
+        if not self._refresh_lock.acquire(blocking=blocking):
             return self.snapshot()
         try:
             selected = None
@@ -163,7 +170,10 @@ class GuardEndpointDiscovery:
                 and self._records[selected].get("status") == "ready"
             )
         if not ready:
-            self.refresh()
+            # Execution authorization must use a fresh observation. If the
+            # background poll currently owns the refresh lock, wait for it and
+            # immediately probe again rather than denying from stale cache.
+            self.refresh(blocking=True)
             with self._lock:
                 selected = self._selected
                 ready = (

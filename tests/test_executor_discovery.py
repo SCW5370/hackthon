@@ -1,5 +1,7 @@
 import io
 import json
+import threading
+import time
 import unittest
 from urllib.error import URLError
 
@@ -78,6 +80,37 @@ class ExecutorDiscoveryTests(unittest.TestCase):
         self.assertFalse(value["ready"])
         with self.assertRaises(ConnectionError):
             discovery.require_ready()
+
+    def test_require_ready_waits_for_inflight_refresh_then_rechecks(self):
+        discovery = GuardEndpointDiscovery(
+            ["http://lan:8788"],
+            opener=lambda *_args, **_kwargs: Response(
+                {
+                    "status": "ready",
+                    "ready": True,
+                    "expected_audience": "joy-guard-01",
+                    "executor": {"type": "joy", "ready": True},
+                }
+            ),
+            autostart=False,
+        )
+        discovery._refresh_lock.acquire()
+
+        def release_after_delay():
+            time.sleep(0.05)
+            discovery._refresh_lock.release()
+
+        releaser = threading.Thread(
+            target=release_after_delay,
+        )
+        releaser.start()
+        try:
+            self.assertEqual(
+                discovery.require_ready(),
+                "http://lan:8788/v1/execute",
+            )
+        finally:
+            releaser.join(timeout=1)
 
 
 if __name__ == "__main__":
