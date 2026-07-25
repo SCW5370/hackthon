@@ -192,7 +192,7 @@ X5 A/B 实机验收：
 
 - 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
 - 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
-- 当前测试集：100 项。
+- 当前测试集：101 项。
 
 X5 的 Dashboard、Orchestrator 与 Runtime 由 systemd 开机自启并设置为任意
 退出后自动拉起。`safeexec-healthcheck.timer` 每 10 秒检查本机健康端点，只有

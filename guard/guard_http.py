@@ -39,6 +39,7 @@ class SafeExecGuard:
         self.executor = executor
         self._lock = threading.RLock()
         self._executor_lock = threading.Lock()
+        self._executing = False
         self._readiness_probe: threading.Thread | None = None
         self._readiness_cache = {
             "schema_version": "safeexec.guard-readiness.v1",
@@ -99,6 +100,8 @@ class SafeExecGuard:
             })
 
         # 3. 调用 Executor
+        with self._lock:
+            self._executing = True
         try:
             with self._executor_lock:
                 exec_receipt = self.executor.execute(intent)
@@ -118,7 +121,6 @@ class SafeExecGuard:
                 "lease_id": lease.get("lease_id"),
                 "execution": exec_receipt,
             }
-            self._schedule_readiness_probe()
             return result
 
         except Exception as e:
@@ -137,6 +139,10 @@ class SafeExecGuard:
                 "lease_id": lease.get("lease_id"),
                 "error": str(e),
             }
+        finally:
+            with self._lock:
+                self._executing = False
+            self._schedule_readiness_probe()
 
     def get_events(self) -> list:
         with self._lock:
@@ -165,10 +171,17 @@ class SafeExecGuard:
         self._schedule_readiness_probe()
         with self._lock:
             value = json.loads(json.dumps(self._readiness_cache))
+            executing = self._executing
         # Keep executor evidence cached, but expose the Guard host's current
         # wall clock on every request. Runtime uses this fresh value to detect
         # cross-device clock skew before issuing a short-lived Lease.
         value["server_time_ms"] = int(time.time() * 1000)
+        if executing and value.get("ready"):
+            value["status"] = "executing"
+            value["executing"] = True
+            value.pop("error", None)
+            return value
+        value["executing"] = False
         checked_at = value.get("checked_at_ms")
         if (
             value.get("ready")

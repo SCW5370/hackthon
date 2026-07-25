@@ -42,6 +42,27 @@ class ExecutorDiscoveryTests(unittest.TestCase):
         self.assertEqual(first["server_time_ms"], 10_000)
         self.assertEqual(second["server_time_ms"], 11_000)
 
+    def test_guard_keeps_confirmed_readiness_while_executor_is_busy(self):
+        _, public_key = LeaseAuthority.generate_keypair()
+        guard = SafeExecGuard(public_key, FakeExecutor())
+        guard._schedule_readiness_probe = lambda: None
+        guard._readiness_cache.update(
+            {
+                "status": "ready",
+                "ready": True,
+                "checked_at_ms": 1_000,
+                "error": None,
+            }
+        )
+        guard._executing = True
+
+        with patch("guard.guard_http.time.time", return_value=30.0):
+            value = guard.readiness()
+
+        self.assertTrue(value["ready"])
+        self.assertTrue(value["executing"])
+        self.assertEqual(value["status"], "executing")
+
     def test_normalizes_execute_url_to_service_base(self):
         self.assertEqual(
             normalize_guard_base_url("http://windows:8788/v1/execute"),
