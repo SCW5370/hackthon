@@ -34,8 +34,8 @@ Register-ScheduledTask `
     -Trigger $Trigger `
     -Principal $Principal `
     -Settings $Settings `
-    -Description "Restarts Guard only after two failed readiness checks while BioLab exists." `
+    -Description "Optional repair task; disabled by default to avoid JOY scene reloads." `
     -Force | Out-Null
 
-Start-ScheduledTask -TaskName $TaskName
-Write-Host "Installed and started scheduled task: $TaskName"
+Disable-ScheduledTask -TaskName $TaskName | Out-Null
+Write-Host "Installed optional watchdog in disabled state: $TaskName"

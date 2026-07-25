@@ -2,7 +2,7 @@ param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$GuardTaskName = "SafeExec Guard",
     [string]$BioLabTaskName = "SafeExec BioLab Twin",
-    [int]$FailureThreshold = 2
+    [int]$FailureThreshold = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,18 +26,7 @@ $BioLab = Get-CimInstance Win32_Process |
         $_.CommandLine -like "*BioLab_Guardian.py*"
     } |
     Select-Object -First 1
-$BioLabConnected = $false
-if ($null -ne $BioLab) {
-    $BioLabConnected = $null -ne (
-        Get-NetTCPConnection `
-            -OwningProcess $BioLab.ProcessId `
-            -RemotePort 18189 `
-            -State Established `
-            -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    )
-}
-if (-not $BioLabConnected) {
+if ($null -eq $BioLab) {
     Stop-ScheduledTask -TaskName $BioLabTaskName -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
     Start-ScheduledTask -TaskName $BioLabTaskName

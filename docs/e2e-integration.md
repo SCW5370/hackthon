@@ -52,13 +52,12 @@ PowerShell，Dashboard 也不会创建 Windows 进程。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_task.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_watchdog.ps1
 ```
 
 该任务直接托管 Guard 前台进程，每分钟最多重试一次；它不会启动 JOY、不会
-绕过 Guard，也不会自动执行任何动作。看门狗每分钟读取一次 Guard
-`/readyz`；若 JOY 已打开但 BioLab 进程未连接，会先重启 BioLab；仅在
-BioLab 已连接且 Guard 连续两次失败时才重启 Guard。
+绕过 Guard，也不会自动执行任何动作。额外的 Guard 看门狗默认禁用：周期性
+重启 PyJop 客户端会造成 JOY 场景重载。正常演示依赖任务计划程序处理进程
+崩溃，连接异常则由 X5 失败关闭并提示操作员，不主动重启设备侧场景。
 
 BioLab 数字孪生脚本也可独立托管；它会在 JOY 尚未就绪时等待或由任务计划
 程序重试。Guard 与 BioLab 优先使用 JOY 附带的 `pythonw.exe`，后台运行时
