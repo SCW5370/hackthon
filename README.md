@@ -383,7 +383,7 @@ PowerShell 安装独立的 Legacy Baseline 常驻任务。Token 只在安装时�
 bash -n scripts/*.sh
 ```
 
-当前版本包含 **111 项自动化测试**，覆盖：
+当前版本包含 **112 项自动化测试**，覆盖：
 
 - Policy、WorkOrder、Lease 和 Fact 匹配；
 - 签名、哈希绑定、防重放与并发消费；

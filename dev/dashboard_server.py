@@ -1021,10 +1021,16 @@ class DemoRestoreSupervisor:
                         else ""
                     )
                     should_restore = (
-                        line.get("line_state") in {"STOPPED", "ERROR"}
-                        and error_code in DEMO_RECOVERABLE_ERRORS
-                        and not line.get("unsafe_recovery")
-                    )
+                        (
+                            line.get("line_state") in {"STOPPED", "ERROR"}
+                            and error_code in DEMO_RECOVERABLE_ERRORS
+                        )
+                        or (
+                            line.get("line_state") == "STOPPED"
+                            and not line.get("active_work_order_id")
+                            and not error_code
+                        )
+                    ) and not line.get("unsafe_recovery")
                 if should_restore:
                     result = self.backend.restore_demo(automatic=True)
                     self.last_result = result

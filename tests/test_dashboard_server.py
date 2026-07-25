@@ -345,6 +345,39 @@ class DashboardServerTests(unittest.TestCase):
                 supervisor._run()
         restore.assert_called_once_with(automatic=True)
 
+    def test_restore_supervisor_repairs_orchestrator_only_restart(self) -> None:
+        supervisor = DemoRestoreSupervisor(
+            self.backend,
+            enabled=True,
+            retry_seconds=1,
+        )
+        with (
+            patch.object(
+                self.backend,
+                "restore_demo",
+                side_effect=[
+                    {"status": "already-running"},
+                    {"status": "restored"},
+                ],
+            ) as restore,
+            patch(
+                "dev.dashboard_server.json_request",
+                return_value={
+                    "line_state": "STOPPED",
+                    "active_work_order_id": None,
+                    "last_error": None,
+                    "unsafe_recovery": None,
+                },
+            ),
+            patch(
+                "dev.dashboard_server.time.sleep",
+                side_effect=[None, KeyboardInterrupt],
+            ),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                supervisor._run()
+        self.assertEqual(restore.call_count, 2)
+
     def test_untrusted_content_is_rendered_with_text_content_only(self) -> None:
         for file_name in ("experience.js", "monitor.js"):
             source = Path(f"console/{file_name}").read_text(encoding="utf-8")
