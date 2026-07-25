@@ -52,10 +52,27 @@ PowerShell，Dashboard 也不会创建 Windows 进程。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_task.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_watchdog.ps1
 ```
 
 该任务直接托管 Guard 前台进程，每分钟最多重试一次；它不会启动 JOY、不会
-绕过 Guard，也不会自动执行任何动作。
+绕过 Guard，也不会自动执行任何动作。看门狗每分钟读取一次 Guard
+`/readyz`，仅在 BioLab 进程存在且连续两次失败时重启 Guard。
+
+BioLab 数字孪生脚本也可独立托管；它会在 JOY 尚未就绪时等待或由任务计划
+程序重试：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_biolab_task.ps1
+```
+
+演示电脑插电后若自动睡眠，会让整个执行端离线。华硕等厂商电源方案可能
+覆写 `powercfg`，因此使用 Windows 执行状态 API，仅在 AC 供电时保持唤醒，
+不修改电池策略或全局电源方案：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_keep_awake_task.ps1
+```
 
 ## 2. X5：启动控制台、Agent 与 Runtime
 
