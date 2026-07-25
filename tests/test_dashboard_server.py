@@ -165,6 +165,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertNotIn("innerHTML", script)
         self.assertIn("textContent", script)
         self.assertNotIn("unsafe-mode-token", experience)
+        self.assertIn("function createChallengeId()", script)
+        self.assertIn("cryptoApi?.getRandomValues", script)
+        self.assertNotIn("challenge_id: crypto.randomUUID()", script)
 
     def test_monitor_is_read_only_and_uses_live_evidence(self) -> None:
         monitor = Path("console/monitor.html").read_text(encoding="utf-8")
