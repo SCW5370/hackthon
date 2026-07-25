@@ -65,8 +65,8 @@ SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
 # X5 边缘控制器模式见 docs/e2e-integration.md
 
 # X5 模式下，Mac 只用浏览器打开控制台
-open http://192.168.128.10:8787
-open http://192.168.128.10:8787/config
+open http://safeexec-x5.local:8787
+open http://safeexec-x5.local:8787/config
 
 # 测试
 .venv/bin/python -m unittest discover -s tests -v
@@ -173,7 +173,16 @@ X5 A/B 实机验收：
 
 - 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
 - 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
-- 当前测试集：81 项。
+- 当前测试集：84 项。
+
+X5 的 Dashboard、Orchestrator 与 Runtime 由 systemd 开机自启并设置为任意
+退出后自动拉起。`safeexec-healthcheck.timer` 每 10 秒检查本机健康端点，只有
+连续两次失败才重启对应服务；Guard/JOY 等外部执行器离线不会触发 X5 重启，
+只会使 Runtime 失败关闭。
+
+Lease 签发后若 Guard 连接中断，Runtime 不会把动作误报为“未执行”，而是标记
+`EXECUTION_OUTCOME_UNKNOWN`，保守消耗对应 WorkOrder 预算并把生产线锁定在
+`ERROR`。操作员必须依据实时物理状态核对结果，再通过签名复位恢复。
 
 ## 开发
 

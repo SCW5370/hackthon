@@ -1,10 +1,12 @@
 import time
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from guard.executor import FakeExecutor, JoyExecutor
 from guard.guard_http import SafeExecGuard
 from lab_agent.contracts import ActionPlan, build_action_intent
-from runtime.contracts import Fact, MissionSpec
+from runtime.contracts import ActionIntent, Fact, MissionSpec
 from runtime.lease_authority import LeaseAuthority
 from runtime.runtime_http import SafeExecRuntime
 
@@ -77,6 +79,29 @@ class UnavailableDiscovery:
 
 
 class SafeExecEndToEndTests(unittest.TestCase):
+    def test_post_lease_connection_loss_is_reported_as_uncertain(self):
+        private_key, _ = LeaseAuthority.generate_keypair()
+        runtime = SafeExecRuntime(mission(), private_key)
+        intent = ActionIntent.from_dict(
+            build_action_intent(
+                ActionPlan("sample-A", "cold-storage", "analyzer-01")
+            )
+        )
+        lease = SimpleNamespace(
+            lease_id="lease-after-dispatch",
+            to_dict=lambda: {"lease_id": "lease-after-dispatch"},
+        )
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=ConnectionResetError("peer reset after dispatch"),
+        ):
+            result = runtime._call_guard(intent, lease)
+        self.assertEqual(result["status"], "uncertain")
+        self.assertEqual(
+            result["reason_code"],
+            "EXECUTION_OUTCOME_UNKNOWN",
+        )
+
     def test_agent_runtime_guard_contract_allows_only_granted_action(self):
         private_key, public_key = LeaseAuthority.generate_keypair()
         executor = FakeExecutor()

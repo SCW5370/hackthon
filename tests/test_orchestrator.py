@@ -124,6 +124,18 @@ class BlockingRuntime(FakeRuntime):
         return super().submit_action(intent)
 
 
+class UncertainRuntime(FakeRuntime):
+    def submit_action(self, intent):
+        self.actions.append(json.loads(json.dumps(intent)))
+        return {
+            "status": "ok",
+            "guard_response": {
+                "status": "uncertain",
+                "reason_code": "EXECUTION_OUTCOME_UNKNOWN",
+            },
+        }
+
+
 class FakeUnsafeExecutor:
     def __init__(self) -> None:
         self.actions = []
@@ -438,6 +450,26 @@ class OrchestratorTests(unittest.TestCase):
         state = app.snapshot()
         self.assertEqual(state["last_error"]["code"], "FACT_STALE")
         self.assertEqual(state["counters"]["recovered_tasks"], 0)
+
+    def test_uncertain_physical_outcome_requires_operator_reset(self) -> None:
+        app = LineOrchestrator(UncertainRuntime(), recovery_delay=0)
+        app.compile_operator_command(
+            self.operator_command("把 sample-B 运送到分析区")
+        )
+        app.start()
+        self.assertEqual(app.wait_until_terminal(), "ERROR")
+        state = app.snapshot()
+        self.assertEqual(
+            state["last_error"]["code"],
+            "EXECUTION_OUTCOME_UNKNOWN",
+        )
+        self.assertEqual(state["tasks"][0]["status"], "FAILED")
+        preflight = app.preflight()
+        self.assertFalse(preflight["ready"])
+        self.assertIn(
+            "LINE_ERROR",
+            {item["code"] for item in preflight["blockers"]},
+        )
 
     def test_pause_waits_for_current_task_then_stops_scheduling(self) -> None:
         runtime = BlockingRuntime()

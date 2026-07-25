@@ -257,7 +257,7 @@ class SafeExecRuntime:
         if (
             matched_work_order_grant is not None
             and intent.work_order_id
-            and guard_response.get("status") == "executed"
+            and guard_response.get("status") in {"executed", "uncertain"}
         ):
             assert self.work_orders is not None
             self.work_orders.consume(
@@ -271,6 +271,7 @@ class SafeExecRuntime:
                     "work_order_id": intent.work_order_id,
                     "grant_id": matched_work_order_grant.grant_id,
                     "request_id": intent.request_id,
+                    "guard_status": guard_response.get("status"),
                 },
             )
 
@@ -283,7 +284,11 @@ class SafeExecRuntime:
         }
         self._record_latest_action(
             intent=intent.to_dict(),
-            status="completed",
+            status=(
+                "uncertain"
+                if guard_response.get("status") == "uncertain"
+                else "completed"
+            ),
             decision=decision.to_dict(),
             lease={
                 "lease_id": lease.lease_id,
@@ -355,22 +360,22 @@ class SafeExecRuntime:
                 )
                 return result
 
-        except urllib.error.URLError as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             self._emit_event(
-                "guard.error",
+                "guard.outcome.uncertain",
                 "runtime",
                 {"lease_id": lease.lease_id, "error": str(e)},
                 "critical",
             )
-            return {"status": "error", "message": f"Guard unavailable: {e}"}
-        except ConnectionError as e:
-            self._emit_event(
-                "guard.error",
-                "runtime",
-                {"lease_id": lease.lease_id, "error": str(e)},
-                "critical",
-            )
-            return {"status": "error", "message": f"Guard unavailable: {e}"}
+            return {
+                "status": "uncertain",
+                "reason_code": "EXECUTION_OUTCOME_UNKNOWN",
+                "lease_id": lease.lease_id,
+                "message": (
+                    "Guard connection failed after Lease issuance; "
+                    f"physical execution may have occurred: {e}"
+                ),
+            }
         finally:
             if discovery is not None:
                 discovery.set_executing(False)

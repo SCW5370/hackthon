@@ -67,15 +67,26 @@ fi
 chown root:root "${DASHBOARD_ENV}"
 chmod 0600 "${DASHBOARD_ENV}"
 
-for unit in safeexec-runtime.service safeexec-orchestrator.service safeexec-dashboard.service; do
+for unit in \
+  safeexec-runtime.service \
+  safeexec-orchestrator.service \
+  safeexec-dashboard.service \
+  safeexec-healthcheck.service \
+  safeexec-healthcheck.timer; do
   install -m 0644 "${SYSTEMD_SOURCE}/${unit}" "${SYSTEMD_TARGET}/${unit}"
 done
 chmod 0755 \
   "${SAFEEXEC_ROOT}/scripts/run_x5_runtime.sh" \
   "${SAFEEXEC_ROOT}/scripts/run_x5_orchestrator.sh" \
-  "${SAFEEXEC_ROOT}/scripts/run_x5_dashboard.sh"
+  "${SAFEEXEC_ROOT}/scripts/run_x5_dashboard.sh" \
+  "${SAFEEXEC_ROOT}/scripts/healthcheck_x5.sh" \
+  "${SAFEEXEC_ROOT}/scripts/configure_x5_identity.sh"
 systemctl daemon-reload
-systemctl enable safeexec-runtime.service safeexec-orchestrator.service safeexec-dashboard.service
+systemctl enable \
+  safeexec-runtime.service \
+  safeexec-orchestrator.service \
+  safeexec-dashboard.service \
+  safeexec-healthcheck.timer
 
 echo "X5 execution domains and boot services configured"
 echo "Agent user:   ${AGENT_USER}"

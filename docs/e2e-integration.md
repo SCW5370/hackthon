@@ -47,6 +47,16 @@ py -m joy.smoke_test
 Guard 可先于 JOY 场景启动；场景重启后会自动重连。演示期间无需再次启动
 PowerShell，Dashboard 也不会创建 Windows 进程。
 
+需要 Windows 登录后自动启动并在异常退出后重试 Guard 时，以管理员身份
+安装计划任务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_task.ps1
+```
+
+该任务直接托管 Guard 前台进程，每分钟最多重试一次；它不会启动 JOY、不会
+绕过 Guard，也不会自动执行任何动作。
+
 ## 2. X5：启动控制台、Agent 与 Runtime
 
 将仓库部署至 `/opt/safeexec`，准备 `.venv`、Lease 私钥、WorkOrder
@@ -55,6 +65,7 @@ Provider 配置，不得提交到 Git。
 
 ```bash
 cd /opt/safeexec
+./scripts/configure_x5_identity.sh
 ./scripts/install_x5_edge.sh
 ./scripts/start_x5_edge.sh
 ```
@@ -66,8 +77,8 @@ cd /opt/safeexec
 默认地址：
 
 - X5 USB：`192.168.128.10`
-- Dashboard：`http://192.168.128.10:8787`
-- 可信配置：`http://192.168.128.10:8787/config`
+- Dashboard：`http://safeexec-x5.local:8787`
+- 可信配置：`http://safeexec-x5.local:8787/config`
 - Orchestrator：`http://192.168.128.10:8789`
 - Runtime：`http://192.168.128.10:8790`
 
@@ -85,8 +96,8 @@ SAFEEXEC_GUARD_CANDIDATES=http://WINDOWS_LAN_IP:8788,http://WINDOWS_TAILSCALE_IP
 Mac 不保存密钥、不运行 SafeExec 服务，只打开浏览器：
 
 ```bash
-open http://192.168.128.10:8787
-open http://192.168.128.10:8787/config
+open http://safeexec-x5.local:8787
+open http://safeexec-x5.local:8787/config
 ```
 
 健康检查：
@@ -154,6 +165,16 @@ GET  /v1/events/stream?after=<seq>
 Runtime 还提供 `GET /readyz`。如果 Guard 或 JOY 不可用，动作会在 Lease
 签发前以 `EXECUTOR_UNAVAILABLE` 失败关闭；连接恢复后不会自动继续旧任务，
 需要操作员检查并执行签名复位。
+
+`safeexec-healthcheck.timer` 每 10 秒检查 X5 三个本机 HTTP 健康端点。单次
+抖动只记一次失败，连续两次失败才重启对应服务。它不探测或重启 Windows
+Guard/JOY，避免把设备侧故障误处理成控制核心故障。X5 重启后不会恢复旧
+WorkOrder 或自动续跑，必须重新签发可信工单并由操作员开始。
+
+若 Guard 在 Lease 签发后、回执返回前断线，物理动作可能已经完成。Runtime
+会返回 `EXECUTION_OUTCOME_UNKNOWN`、保守消耗本次 WorkOrder 预算；
+Orchestrator 进入 `ERROR`，不自动重试或继续后续任务。操作员须先根据
+`/v1/physical` 核对现场，再执行经过 Runtime、Lease、Guard 的签名复位。
 
 ## 6. Agent Provider
 
@@ -226,6 +247,8 @@ export LAB_LEGACY_TOKEN
 - JOY 无动作：确认游戏仍停留在 BioLab 场景，RPC 端口为 `18189`。
 - X5 未发现 Guard：检查 `/etc/safeexec/runtime.env`，再查询 Runtime
   `/readyz` 中每个候选地址的错误。
+- `safeexec-x5.local` 无法打开：确认 Mac 与 X5 在同一局域网、Avahi 正常，
+  并将该主机名加入本机代理直连列表；USB 兜底地址仍为 `192.168.128.10`。
 - `healthz` 正常但无法开始：查询 `/v1/preflight`；通常是 JOY 未深度就绪
   或尚未激活可信工单。
 - Dashboard 没有实时事件：检查 Orchestrator `8789`，而不是直接检查 Runtime。

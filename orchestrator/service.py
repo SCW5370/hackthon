@@ -464,6 +464,13 @@ class LineOrchestrator:
                     "message": "尚未激活已验证的可信工单",
                 }
             )
+        if line_state == "ERROR":
+            blockers.append(
+                {
+                    "code": "LINE_ERROR",
+                    "message": "存在未决故障；核对物理状态后执行签名复位",
+                }
+            )
         ready = not blockers
         connectivity = runtime.get("executor_connectivity")
         selected_guard = (
@@ -1053,6 +1060,13 @@ class LineOrchestrator:
                 self._current_task_id = task["task_id"]
             try:
                 self._process_task(task)
+            except ExecutionOutcomeUncertainError as exc:
+                self._fail_task(
+                    task,
+                    "EXECUTION_OUTCOME_UNKNOWN",
+                    str(exc),
+                )
+                return
             except Exception as exc:
                 self._fail_task(task, "ORCHESTRATOR_FAILURE", str(exc))
                 return
@@ -1442,6 +1456,11 @@ class LineOrchestrator:
         if response.get("status") != "ok":
             raise RuntimeError(f"{action} was not allowed: {response!r}")
         guard = response.get("guard_response")
+        if isinstance(guard, Mapping) and guard.get("status") == "uncertain":
+            raise ExecutionOutcomeUncertainError(
+                f"{action} may have reached the physical executor; "
+                "operator reconciliation and signed reset are required"
+            )
         if not isinstance(guard, Mapping) or guard.get("status") != "executed":
             raise RuntimeError(f"{action} was not executed by Guard: {guard!r}")
         execution = guard.get("execution")
@@ -1521,3 +1540,7 @@ class NotFoundError(OrchestratorError):
 
 class AuthorizationError(OrchestratorError):
     status = 401
+
+
+class ExecutionOutcomeUncertainError(OrchestratorError):
+    status = 503

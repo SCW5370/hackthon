@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SafeExec local health watchdog
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
