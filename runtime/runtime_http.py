@@ -28,6 +28,15 @@ from .work_orders import WorkOrderRegistry
 from .executor_discovery import GuardEndpointDiscovery
 
 
+class RuntimeServer(ThreadingHTTPServer):
+    """Silence expected client disconnects during service failover."""
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class SafeExecRuntime:
     """
     SafeExec Runtime 主类
@@ -670,7 +679,7 @@ def main():
         guard_candidates=args.guard_candidate or None,
     )
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server = RuntimeServer((args.host, args.port), Handler)
     print(f"SafeExec Runtime listening on {args.host}:{args.port}")
     server.serve_forever()
 
