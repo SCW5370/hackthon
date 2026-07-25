@@ -177,10 +177,11 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 Lease 重放。前两类经过真实 Runtime；后两类复用生产 Guard 的签名、哈希绑定
 和防重放验证器，但不调用 Executor。
 
-持续模式不在运行时动态创建或删除 JOY 实体。六个物理载体完成分析后，通过
-独立的 `lab.sample.recycle` ActionIntent 走完 Policy、Lease、Guard 和 JOY
-链路后回到等候区；Orchestrator 为它生成新的 `LOT-xxxx-X` 逻辑批次并追加到
-队尾。攻击可使用 `target_task_id=next-queued` 原子绑定当时下一件待处理任务。
+持续模式不在运行时逐件创建或删除 JOY 实体。A～F 会先全部完成搬运并共同
+停留在分析区；整批完成后，Orchestrator 才提交一次签名 `lab.line.reset`
+动作，经 Policy、Lease、Guard 和 JOY 原子换线。随后六个物理载体一起回到
+等候区，并获得下一轮 `LOT-xxxx-X` 逻辑批次。攻击可使用
+`target_task_id=next-queued` 原子绑定当时下一件待处理任务。
 
 ## 测试
 
