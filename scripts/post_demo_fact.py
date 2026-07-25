@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime-url", default="http://127.0.0.1:8787")
+    parser.add_argument("--runtime-url", default="http://127.0.0.1:8790")
     parser.add_argument("--ttl-ms", type=int, default=1500)
     args = parser.parse_args()
     payload = {

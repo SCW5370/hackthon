@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safeexec.local/contracts/attack_result.v1.schema.json",
+  "title": "SafeExec AttackLab Result V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "attack_id",
+    "run_id",
+    "target",
+    "started_at_ms",
+    "finished_at_ms",
+    "observations",
+    "verdict"
+  ],
+  "properties": {
+    "schema_version": {"const": "safeexec.attack-result.v1"},
+    "attack_id": {"type": "string"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "target": {
+      "enum": ["replay", "orchestrator_http", "runtime_http"]
+    },
+    "started_at_ms": {"type": "integer", "minimum": 0},
+    "finished_at_ms": {"type": "integer", "minimum": 0},
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_compromised",
+        "malicious_intent_generated",
+        "runtime_effect",
+        "reason_code",
+        "lease_issued",
+        "guard_reached",
+        "executor_called",
+        "physical_changed",
+        "recovery_state",
+        "recovery_time_ms"
+      ],
+      "properties": {
+        "agent_compromised": {"type": ["boolean", "null"]},
+        "malicious_intent_generated": {"type": ["boolean", "null"]},
+        "runtime_effect": {"type": ["string", "null"]},
+        "reason_code": {"type": ["string", "null"]},
+        "lease_issued": {"type": ["boolean", "null"]},
+        "guard_reached": {"type": ["boolean", "null"]},
+        "executor_called": {"type": ["boolean", "null"]},
+        "physical_changed": {"type": ["boolean", "null"]},
+        "recovery_state": {
+          "enum": [
+            "not_available",
+            "not_started",
+            "recovering",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "recovery_time_ms": {"type": ["integer", "null"], "minimum": 0},
+        "physical_evidence": {"type": ["object", "null"]}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "event_ref"],
+        "properties": {
+          "source": {
+            "enum": ["agent", "runtime", "guard", "joy", "orchestrator"]
+          },
+          "event_ref": {"type": "string"},
+          "digest": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "verdict": {
+      "enum": [
+        "normal_allowed",
+        "attack_blocked",
+        "attack_succeeded",
+        "inconclusive",
+        "evaluation_error"
+      ]
+    }
+  }
+}

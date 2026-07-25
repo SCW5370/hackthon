@@ -26,7 +26,7 @@ from adapters.vision_adapter_core import (
 
 
 class FactSink:
-    def __init__(self, fact_url: str, frame_url: str) -> None:
+    def __init__(self, fact_url: str, frame_url: str | None) -> None:
         self.fact_url = fact_url
         self.frame_url = frame_url
 
@@ -42,6 +42,8 @@ class FactSink:
                 raise RuntimeError(f"Fact endpoint returned HTTP {response.status}")
 
     def publish_frame(self, data: bytes) -> None:
+        if not self.frame_url:
+            return
         request = Request(
             self.frame_url,
             data=data,
@@ -173,10 +175,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument(
-        "--fact-url", default="http://192.168.128.20:8787/api/facts"
+        "--fact-url", default="http://192.168.128.20:8790/v1/facts"
     )
     parser.add_argument(
-        "--frame-url", default="http://192.168.128.20:8787/api/frame"
+        "--frame-url", default=""
     )
     parser.add_argument("--image-topic", default="/image")
     parser.add_argument("--camera-info-topic", default="/camera_info")

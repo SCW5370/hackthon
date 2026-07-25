@@ -103,6 +103,12 @@ class LeaseVerifier:
         if lease.request_id != intent.get("request_id"):
             self._stats["hash_mismatch"] += 1
             return False, "REQUEST_ID_MISMATCH", None
+        if (
+            intent.get("schema_version") == "safeexec.action.v2"
+            and lease.mission_id != intent.get("work_order_id")
+        ):
+            self._stats["hash_mismatch"] += 1
+            return False, "WORK_ORDER_BINDING_MISMATCH", None
 
         # 7. SQLite 原子消费 (防重放)
         if not self._lease_store.try_consume(lease.lease_id):
@@ -173,6 +179,10 @@ class LeaseVerifier:
             "resource": intent_dict["resource"],
             "arguments": intent_dict["arguments"],
         }
+        if intent_dict.get("schema_version") == "safeexec.action.v2":
+            if "work_order_id" not in intent_dict:
+                raise ValueError("safeexec.action.v2 requires work_order_id")
+            d["work_order_id"] = intent_dict["work_order_id"]
         return json.dumps(d, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
     def get_stats(self) -> dict:

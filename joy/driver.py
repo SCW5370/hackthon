@@ -88,6 +88,11 @@ class JoyDriver:
     def reset(self) -> dict[str, Any]:
         return self._rpc("reset")
 
+    def recycle(self, sample_id: str) -> dict[str, Any]:
+        resolve_location(sample_id, "analyzer-01")
+        resolve_location(sample_id, "cold-storage")
+        return self._rpc("recycle", {"sample_id": sample_id})
+
     def disconnect(self) -> None:
         """Close a live pyjop client.
 

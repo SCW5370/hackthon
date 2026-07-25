@@ -44,19 +44,39 @@ mutation.
 ## Generate and start the level
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_biolab.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start_windows_demo.ps1
 ```
 
-This starts `joy\BioLab_Guardian.py` in the background. It selects
-`MinimalisticIndoor`, creates all named entities, assigns RFID tags, registers
-the six RPCs, and starts the non-blocking arm state machine. No manual scene
-placement is required.
+This starts `joy\BioLab_Guardian.py` and the device-side Guard in the
+background, then waits for `http://127.0.0.1:8788/readyz`. It selects
+`MinimalisticIndoor`, creates `sample-A` through `sample-F` in a 2×3 waiting
+grid, assigns unique colors, RFID tags, and destination slots, registers the
+six RPCs, and starts the non-blocking arm state machine. Completed samples do
+not overlap, and no manual scene placement is required.
+
+V3 uses continuous dock-to-dock routing. After a sample is released, the arm
+retracts to its safe pose but the mobile base stays at the destination. The
+next command travels directly from that dock to its source instead of returning
+Home after every item. `BIOLAB_PLATFORM_MOVE_DURATION` and
+`BIOLAB_TIME_DILATION` can tune demo speed; defaults are `1.8` seconds and
+`1.35`.
 
 Stop only the background level runtime with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\stop_biolab.ps1
 ```
+
+Stop the complete Windows device side with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\stop_windows_demo.ps1
+```
+
+The Guard uses a cached background JOY probe so an 8-second pyjop response
+cannot block HTTP liveness. It reconnects after the level restarts. X5 discovers
+this Guard service from an explicit allow-list; discovery never executes a
+command.
 
 ## Reproduce the scenarios
 
@@ -107,7 +127,8 @@ The command object handed to the future security layer is:
 `transfer()` validates only structure, known entity names, and current source
 location. It intentionally does not decide whether a business route is safe.
 After the security member validates a command, it should call
-`JoyDriver.transfer()`.
+`JoyDriver.transfer()`. `reset()` restores all six samples and is accepted only
+while the line is not running.
 
 ## Tests
 
@@ -123,5 +144,5 @@ Live JOY smoke test:
 py -m joy.smoke_test
 ```
 
-The smoke test checks the 18189 connection, required unique entities, RFID
+The smoke test checks the 18189 connection, unique A–F entities and RFID
 values, normal transfer, Legacy transfer, Reset, Pause, and Resume.

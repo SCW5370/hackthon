@@ -32,12 +32,12 @@ from joy.command import JoyCommand  # noqa: E402
 from joy.locations import (  # noqa: E402
     ARM_BASE_WORLD_Z,
     ARM_HOME,
-    DESTINATION_COORDS,
     PLATFORM_HOME_RELATIVE,
     PLATFORM_HOME_WORLD,
     REQUIRED_ENTITY_NAMES,
     RFID_TAGS,
     SAMPLE_STORAGE_COORDS,
+    SAMPLE_IDS,
 )
 from joy.state_machine import BioLabController, RobotAction  # noqa: E402
 
@@ -52,7 +52,8 @@ mobile_base: MovablePlatform | None = None
 exchange: DataExchange | None = None
 status_light: LEDStrip | None = None
 platform_move_until: float | None = None
-PLATFORM_MOVE_DURATION = 3.0
+PLATFORM_MOVE_DURATION = float(os.getenv("BIOLAB_PLATFORM_MOVE_DURATION", "1.8"))
+ACTIVE_TIME_DILATION = float(os.getenv("BIOLAB_TIME_DILATION", "1.35"))
 
 
 def _spawn_floor(
@@ -118,24 +119,24 @@ editor.select_map(SpawnableMaps.SmallWarehouse)
 _build_lanes()
 _build_stations()
 
-editor.spawn_static_mesh(
-    SpawnableMeshes.Cylinder,
-    unique_name="sample-A",
-    location=SAMPLE_STORAGE_COORDS["sample-A"],
-    scale=(0.22, 0.22, 0.45),
-    material=SpawnableMaterials.SimpleColor,
-    color=Colors.Blue,
-    rfid_tag=RFID_TAGS["sample-A"],
+sample_colors = (
+    Colors.Blue,
+    Colors.Yellow,
+    Colors.Green,
+    Colors.Firebrick,
+    Colors.Lightblue,
+    Colors.Gold,
 )
-editor.spawn_static_mesh(
-    SpawnableMeshes.Cylinder,
-    unique_name="sample-B",
-    location=SAMPLE_STORAGE_COORDS["sample-B"],
-    scale=(0.22, 0.22, 0.45),
-    material=SpawnableMaterials.SimpleColor,
-    color=Colors.Yellow,
-    rfid_tag=RFID_TAGS["sample-B"],
-)
+for sample_id, color in zip(SAMPLE_IDS, sample_colors):
+    editor.spawn_static_mesh(
+        SpawnableMeshes.Cylinder,
+        unique_name=sample_id,
+        location=SAMPLE_STORAGE_COORDS[sample_id],
+        scale=(0.18, 0.18, 0.38),
+        material=SpawnableMaterials.SimpleColor,
+        color=color,
+        rfid_tag=RFID_TAGS[sample_id],
+    )
 
 editor.spawn_entity(
     SpawnableEntities.MovablePlatform,
@@ -193,6 +194,10 @@ def _set_status_color(color: Colors) -> None:
 
 def _published_status() -> dict[str, Any]:
     payload = controller.health()
+    payload["time_dilation"] = (
+        0.05 if controller.paused else ACTIVE_TIME_DILATION
+    )
+    payload["platform_move_duration"] = PLATFORM_MOVE_DURATION
     payload["level"] = "BioLab_Guardian_Warehouse"
     payload["required_entities"] = list(REQUIRED_ENTITY_NAMES)
     payload["physical_positions"] = {
@@ -220,10 +225,10 @@ def _reset_runtime() -> dict[str, Any]:
         "safeexec_arm",
         (PLATFORM_HOME_WORLD[0], PLATFORM_HOME_WORLD[1], ARM_BASE_WORLD_Z),
     )
-    editor.set_location("sample-A", SAMPLE_STORAGE_COORDS["sample-A"])
-    editor.set_location("sample-B", SAMPLE_STORAGE_COORDS["sample-B"])
+    for sample_id in SAMPLE_IDS:
+        editor.set_location(sample_id, SAMPLE_STORAGE_COORDS[sample_id])
     arm.set_grabber_location(ARM_HOME)
-    env.set_time_dilation(1.0)
+    env.set_time_dilation(ACTIVE_TIME_DILATION)
     _set_status_color(Colors.Green)
     _publish()
     return controller.health()
@@ -239,6 +244,20 @@ def _parse_transfer_request(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Jo
     return JoyCommand.from_mapping(value)
 
 
+def _parse_recycle_request(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> str:
+    if len(args) == 1 and not kwargs and isinstance(args[0], dict):
+        value = args[0]
+    elif not args and isinstance(kwargs.get("request"), dict):
+        value = kwargs["request"]
+    else:
+        raise ValueError("recycle expects exactly one request object")
+    if set(value) != {"sample_id"} or value["sample_id"] not in SAMPLE_IDS:
+        raise ValueError("recycle requires one known sample_id")
+    return str(value["sample_id"])
+
+
 def _handle_rpc(sender: DataExchange, request: Any) -> None:
     name = request.func_name
     try:
@@ -249,18 +268,30 @@ def _handle_rpc(sender: DataExchange, request: Any) -> None:
         elif name == "transfer":
             command = _parse_transfer_request(request.args, request.kwargs)
             result = controller.enqueue(command)
+        elif name == "recycle":
+            sample_id = _parse_recycle_request(request.args, request.kwargs)
+            result = controller.recycle(sample_id)
+            editor.set_location(sample_id, SAMPLE_STORAGE_COORDS[sample_id])
+            result["recycled_sample_id"] = sample_id
+            result["current_dock"] = controller.current_dock
+            result["arm_state"] = controller.arm_state
+            result["platform_state"] = controller.platform_state
         elif name == "pause":
             result = controller.pause()
             env.set_time_dilation(0.05)
             _set_status_color(Colors.Blue)
         elif name == "resume":
-            env.set_time_dilation(1.0)
+            env.set_time_dilation(ACTIVE_TIME_DILATION)
             result = controller.resume()
             _set_status_color(Colors.Yellow if controller.active_command else Colors.Green)
         elif name == "reset":
             result = _reset_runtime()
         else:
             raise ValueError(f"unknown RPC: {name!r}")
+        result["time_dilation"] = (
+            0.05 if controller.paused else ACTIVE_TIME_DILATION
+        )
+        result["platform_move_duration"] = PLATFORM_MOVE_DURATION
         response = {"ok": True, **result}
     except (AssertionError, KeyError, TypeError, ValueError) as exc:
         response = {"ok": False, "error": str(exc)}

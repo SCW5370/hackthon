@@ -9,17 +9,21 @@ import time
 import uuid
 from typing import Any, Mapping
 
+from biolab.catalog import (
+    LINE_ID,
+    LINE_RESOURCE_TYPE,
+    LOCATION_NAMES,
+    RECYCLE_ACTION,
+    RESET_ACTION,
+    SAMPLE_IDS,
+    SAMPLE_RESOURCE_TYPE,
+    TRANSFER_ACTION,
+)
 
 SCHEMA_VERSION = "safeexec.action.v1"
-ACTION = "lab.sample.transfer"
-RESOURCE_TYPE = "lab.sample"
-SAMPLE_IDS = ("sample-A", "sample-B")
-LOCATION_NAMES = (
-    "cold-storage",
-    "analyzer-01",
-    "waste-bin",
-    "quarantine-zone",
-)
+SCHEMA_VERSION_V2 = "safeexec.action.v2"
+ACTION = TRANSFER_ACTION
+RESOURCE_TYPE = SAMPLE_RESOURCE_TYPE
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -72,11 +76,12 @@ def build_action_intent(
     plan: ActionPlan,
     *,
     principal_id: str = "lab-agent-01",
+    work_order_id: str | None = None,
     request_id: str | None = None,
     issued_at_ms: int | None = None,
 ) -> dict[str, Any]:
     value = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": SCHEMA_VERSION_V2 if work_order_id else SCHEMA_VERSION,
         "request_id": request_id or str(uuid.uuid4()),
         "principal_id": principal_id,
         "issued_at_ms": issued_at_ms or int(time.time() * 1000),
@@ -87,12 +92,62 @@ def build_action_intent(
             "destination": plan.destination,
         },
     }
+    if work_order_id:
+        value["work_order_id"] = work_order_id
+    validate_action_intent(value)
+    return value
+
+
+def build_reset_intent(
+    *,
+    principal_id: str = "lab-agent-01",
+    request_id: str | None = None,
+    issued_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Build the only privileged production-line control action in V2."""
+
+    value = {
+        "schema_version": SCHEMA_VERSION,
+        "request_id": request_id or str(uuid.uuid4()),
+        "principal_id": principal_id,
+        "issued_at_ms": issued_at_ms or int(time.time() * 1000),
+        "action": RESET_ACTION,
+        "resource": {"type": LINE_RESOURCE_TYPE, "id": LINE_ID},
+        "arguments": {"command": "reset"},
+    }
+    validate_action_intent(value)
+    return value
+
+
+def build_recycle_intent(
+    sample_id: str,
+    *,
+    principal_id: str = "lab-agent-01",
+    request_id: str | None = None,
+    issued_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Build the signed maintenance action used by the physical entity pool."""
+
+    if sample_id not in SAMPLE_IDS:
+        raise ValueError(f"unknown sample_id: {sample_id!r}")
+    value = {
+        "schema_version": SCHEMA_VERSION,
+        "request_id": request_id or str(uuid.uuid4()),
+        "principal_id": principal_id,
+        "issued_at_ms": issued_at_ms or int(time.time() * 1000),
+        "action": RECYCLE_ACTION,
+        "resource": {"type": RESOURCE_TYPE, "id": sample_id},
+        "arguments": {
+            "source": "analyzer-01",
+            "destination": "cold-storage",
+        },
+    }
     validate_action_intent(value)
     return value
 
 
 def validate_action_intent(value: Mapping[str, Any]) -> None:
-    expected = {
+    base = {
         "schema_version",
         "request_id",
         "principal_id",
@@ -101,6 +156,8 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
         "resource",
         "arguments",
     }
+    schema_version = value.get("schema_version")
+    expected = base | ({"work_order_id"} if schema_version == SCHEMA_VERSION_V2 else set())
     if set(value) != expected:
         raise ValueError(
             f"invalid ActionIntent fields; "
@@ -108,8 +165,13 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
             f"extra={sorted(set(value) - expected)}"
         )
 
-    if value["schema_version"] != SCHEMA_VERSION:
+    if schema_version not in {SCHEMA_VERSION, SCHEMA_VERSION_V2}:
         raise ValueError("unsupported schema_version")
+    if schema_version == SCHEMA_VERSION_V2:
+        try:
+            uuid.UUID(str(value["work_order_id"]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("work_order_id must be a UUID") from exc
     try:
         parsed_request_id = uuid.UUID(str(value["request_id"]))
     except (AttributeError, TypeError, ValueError) as exc:
@@ -122,26 +184,38 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
         value["issued_at_ms"], int
     ):
         raise ValueError("issued_at_ms must be an integer")
-    if value["action"] != ACTION:
+    if value["action"] not in {ACTION, RECYCLE_ACTION, RESET_ACTION}:
         raise ValueError(f"unsupported action: {value['action']!r}")
 
     resource = value["resource"]
     if not isinstance(resource, Mapping) or set(resource) != {"type", "id"}:
         raise ValueError("resource must contain exactly type and id")
-    if resource["type"] != RESOURCE_TYPE:
-        raise ValueError("unsupported resource type")
-
     arguments = value["arguments"]
-    if not isinstance(arguments, Mapping) or set(arguments) != {
-        "source",
-        "destination",
-    }:
-        raise ValueError("arguments must contain exactly source and destination")
-    ActionPlan(
-        sample_id=str(resource["id"]),
-        source=str(arguments["source"]),
-        destination=str(arguments["destination"]),
-    )
+    if value["action"] in {ACTION, RECYCLE_ACTION}:
+        if resource["type"] != RESOURCE_TYPE:
+            raise ValueError("unsupported resource type")
+        if not isinstance(arguments, Mapping) or set(arguments) != {
+            "source",
+            "destination",
+        }:
+            raise ValueError("arguments must contain exactly source and destination")
+        ActionPlan(
+            sample_id=str(resource["id"]),
+            source=str(arguments["source"]),
+            destination=str(arguments["destination"]),
+        )
+        if value["action"] == RECYCLE_ACTION and dict(arguments) != {
+            "source": "analyzer-01",
+            "destination": "cold-storage",
+        }:
+            raise ValueError("unsupported recycle route")
+    else:
+        if dict(resource) != {"type": LINE_RESOURCE_TYPE, "id": LINE_ID}:
+            raise ValueError("unsupported reset resource")
+        if not isinstance(arguments, Mapping) or dict(arguments) != {
+            "command": "reset"
+        }:
+            raise ValueError("unsupported reset arguments")
 
 
 def plan_to_dict(plan: ActionPlan) -> dict[str, str]:

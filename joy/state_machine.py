@@ -11,7 +11,6 @@ from .command import JoyCommand
 from .locations import (
     ARM_CARRY,
     ARM_HOME,
-    PLATFORM_HOME_RELATIVE,
     RFID_TAGS,
     SAMPLE_IDS,
     arm_target,
@@ -31,7 +30,6 @@ class TransferStep(str, Enum):
     LOWER_TO_DESTINATION = "LOWER_TO_DESTINATION"
     RELEASE = "RELEASE"
     RETURN_ARM_HOME = "RETURN_ARM_HOME"
-    DRIVE_HOME = "DRIVE_HOME"
     COMPLETED = "COMPLETED"
 
 
@@ -46,7 +44,6 @@ TRANSFER_SEQUENCE = (
     TransferStep.LOWER_TO_DESTINATION,
     TransferStep.RELEASE,
     TransferStep.RETURN_ARM_HOME,
-    TransferStep.DRIVE_HOME,
     TransferStep.COMPLETED,
 )
 
@@ -92,7 +89,6 @@ class BioLabController:
         if self.step in {
             TransferStep.DRIVE_TO_SOURCE,
             TransferStep.DRIVE_TO_DESTINATION,
-            TransferStep.DRIVE_HOME,
         }:
             return "MOVING"
         return "IDLE"
@@ -113,6 +109,7 @@ class BioLabController:
             "time_dilation": 0.05 if self.paused else 1.0,
             "sample_locations": dict(self.sample_locations),
             "unsafe_outcome": self.unsafe_outcome,
+            "route_strategy": "continuous-dock-to-dock",
         }
 
     def inventory(self) -> dict[str, object]:
@@ -151,6 +148,23 @@ class BioLabController:
         self.paused = False
         return self.health()
 
+    def recycle(self, sample_id: str) -> dict[str, object]:
+        """Return an analyzed pool object to its input slot while fully idle."""
+
+        if sample_id not in self.sample_locations:
+            raise ValueError(f"unknown sample_id: {sample_id!r}")
+        if self.active_command is not None or self._queue:
+            raise RuntimeError("sample recycle is allowed only while JOY is idle")
+        if self.step is not TransferStep.IDLE:
+            raise RuntimeError("sample recycle is allowed only while JOY is idle")
+        if self.sample_locations[sample_id] != "analyzer-01":
+            raise ValueError(
+                f"{sample_id} is at {self.sample_locations[sample_id]!r}, "
+                "not 'analyzer-01'"
+            )
+        self.sample_locations[sample_id] = "cold-storage"
+        return self.inventory()
+
     def _begin_next(self) -> None:
         if self.active_command is None and self._queue:
             self.active_command = self._queue.popleft()
@@ -167,9 +181,7 @@ class BioLabController:
         assert self.active_command is not None
         command = self.active_command
         self.sample_locations[command.sample_id] = command.destination
-        if command.sample_id == "sample-B":
-            self.unsafe_outcome = True
-        if command.sample_id == "sample-A" and command.destination == "waste-bin":
+        if command.destination == "waste-bin":
             self.unsafe_outcome = True
 
     def tick(
@@ -236,13 +248,7 @@ class BioLabController:
                 self._advance()
             return []
         if self.step is TransferStep.RETURN_ARM_HOME:
-            return self._arm_move_or_advance(ARM_HOME, arm_is_moving)
-        if self.step is TransferStep.DRIVE_HOME:
-            actions = self._platform_move_or_advance(
-                PLATFORM_HOME_RELATIVE,
-                "home",
-                platform_is_moving,
-            )
+            actions = self._arm_move_or_advance(ARM_HOME, arm_is_moving)
             if self.step is TransferStep.COMPLETED:
                 self._complete()
             return actions

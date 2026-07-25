@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>SafeExec 可信配置</title>
+  <link rel="stylesheet" href="/config.css">
+</head>
+<body>
+  <header class="topbar config-topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">S</span>
+      <div>
+        <p class="brand-context">SafeExec Control Plane</p>
+        <h1>可信配置</h1>
+      </div>
+    </div>
+    <nav class="page-nav" aria-label="SafeExec 页面">
+      <a href="/experience">互动体验</a>
+      <a href="/monitor">安全观测墙</a>
+      <a href="/config" aria-current="page">可信配置</a>
+    </nav>
+    <div class="config-health" aria-live="polite">
+      <span class="state-dot" id="issuer-dot"></span>
+      <div>
+        <span class="micro-label">签名控制面</span>
+        <strong id="issuer-status">连接中</strong>
+      </div>
+    </div>
+    <a class="button-link" href="/experience">返回互动体验</a>
+  </header>
+
+  <div class="notice" id="config-notice" role="status" hidden></div>
+
+  <main class="config-workspace">
+    <aside class="config-sidebar">
+      <section class="policy-summary" aria-labelledby="policy-title">
+        <div class="section-heading">
+          <h2 id="policy-title">组织策略上限</h2>
+          <span class="verified-chip">Runtime 已加载</span>
+        </div>
+        <dl class="definition-list">
+          <div><dt>策略 ID</dt><dd class="mono" id="policy-id">—</dd></div>
+          <div><dt>Agent 主体</dt><dd class="mono" id="policy-principal">—</dd></div>
+          <div><dt>允许动作</dt><dd class="mono">lab.sample.transfer</dd></div>
+          <div><dt>执行设备</dt><dd class="mono">joy-guard-01</dd></div>
+          <div><dt>实时事实</dt><dd class="mono" id="work-order-facts">读取中</dd></div>
+          <div><dt>可信签发方</dt><dd class="mono" id="trusted-issuer">—</dd></div>
+        </dl>
+        <p class="boundary-note">
+          工单只能收紧这组边界，不能签发组织策略之外的目标、动作或设备权限。
+        </p>
+      </section>
+
+      <section class="execution-config" aria-labelledby="path-title">
+        <div class="section-heading">
+          <h2 id="path-title">演示执行路径</h2>
+          <span class="path-chip" id="path-chip">SafeExec</span>
+        </div>
+        <p id="path-description">动作经过 Runtime、一次性 Lease 与设备侧 Guard。</p>
+        <div class="segmented-control" role="group" aria-label="选择执行路径">
+          <button id="protected-mode-btn" aria-pressed="true">启用 SafeExec</button>
+          <button id="unsafe-mode-btn" class="danger-choice" aria-pressed="false">无保护对照</button>
+        </div>
+        <label class="field compact-field">
+          <span>对照演示 Token</span>
+          <input id="unsafe-mode-token" type="password" autocomplete="off" placeholder="仅切换无保护模式时使用">
+        </label>
+      </section>
+    </aside>
+
+    <div class="config-main">
+      <section class="work-order-editor" aria-labelledby="editor-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="editor-title">签发可信工单</h2>
+            <p>结构化字段由控制面签名，Agent 无权修改。</p>
+          </div>
+          <span class="line-state-chip" id="config-line-state">读取中</span>
+        </div>
+
+        <form id="work-order-form">
+          <fieldset class="sample-selector">
+            <legend>授权样品</legend>
+            <p>每个样品授权最多执行一次。</p>
+            <div class="sample-options">
+              <label><input type="checkbox" name="sample" value="sample-A" checked><span>A</span>sample-A</label>
+              <label><input type="checkbox" name="sample" value="sample-B" checked><span>B</span>sample-B</label>
+              <label><input type="checkbox" name="sample" value="sample-C" checked><span>C</span>sample-C</label>
+              <label><input type="checkbox" name="sample" value="sample-D" checked><span>D</span>sample-D</label>
+              <label><input type="checkbox" name="sample" value="sample-E"><span>E</span>sample-E</label>
+              <label><input type="checkbox" name="sample" value="sample-F"><span>F</span>sample-F</label>
+            </div>
+          </fieldset>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>Agent 主体</span>
+              <input id="work-order-principal" value="lab-agent-01" readonly>
+            </label>
+            <label class="field">
+              <span>有效期</span>
+              <select id="work-order-validity">
+                <option value="900000">15 分钟</option>
+                <option value="1800000">30 分钟</option>
+                <option value="3600000" selected>60 分钟</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>起点</span>
+              <select id="work-order-source">
+                <option value="cold-storage">等候区（cold-storage）</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>授权目标</span>
+              <select id="work-order-destination">
+                <option value="analyzer-01">分析区（analyzer-01）</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>工单说明</span>
+            <textarea id="work-order-note" rows="2" maxlength="500">将所选实验样品从等候区送至分析区</textarea>
+          </label>
+
+          <div class="signing-preview">
+            <div>
+              <span>签发流程</span>
+              <strong>结构校验 → Ed25519 签名 → Runtime 验签 → 激活队列</strong>
+            </div>
+            <button id="issue-work-order-btn" class="primary" type="submit">签名并激活工单</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="active-order" aria-labelledby="active-order-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="active-order-title">当前可信工单</h2>
+            <p>只有这里激活的授权，才能与 Agent 动作匹配。</p>
+          </div>
+          <span class="verified-chip" id="order-verification">等待工单</span>
+        </div>
+        <div class="empty-order" id="empty-order">
+          尚未激活工单。完成上方配置后，运行监控页才会允许启动生产线。
+        </div>
+        <div id="order-details" hidden>
+          <dl class="order-facts">
+            <div><dt>WorkOrder ID</dt><dd class="mono" id="active-order-id">—</dd></div>
+            <div><dt>签发方</dt><dd class="mono" id="active-order-issuer">—</dd></div>
+            <div><dt>主体</dt><dd class="mono" id="active-order-subject">—</dd></div>
+            <div><dt>到期时间</dt><dd id="active-order-expiry">—</dd></div>
+          </dl>
+          <div class="grant-table-wrap">
+            <table class="grant-table">
+              <thead><tr><th>资源</th><th>动作</th><th>路径</th><th>预算</th></tr></thead>
+              <tbody id="grant-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/config.js"></script>
+</body>
+</html>

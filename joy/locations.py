@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
+from biolab.catalog import LOCATION_NAMES, SAMPLE_IDS
 
 Vector3 = tuple[float, float, float]
 
@@ -12,14 +13,6 @@ PLATFORM_HOME_RELATIVE: Final[Vector3] = (0.0, 0.0, 0.0)
 ARM_HOME: Final[Vector3] = (0.0, 0.0, 2.0)
 ARM_CARRY: Final[Vector3] = (1.4, 0.0, 1.45)
 ARM_BASE_WORLD_Z: Final[float] = 0.4
-
-SAMPLE_IDS: Final[tuple[str, ...]] = ("sample-A", "sample-B")
-LOCATION_NAMES: Final[tuple[str, ...]] = (
-    "cold-storage",
-    "analyzer-01",
-    "waste-bin",
-    "quarantine-zone",
-)
 
 # Every station is 1.4 m east of its dock. The platform never rotates, keeping
 # arm targets stable and visually placing the arm between the lane and station.
@@ -31,19 +24,43 @@ DOCK_COORDS: Final[dict[str, Vector3]] = {
 }
 
 SAMPLE_STORAGE_COORDS: Final[dict[str, Vector3]] = {
-    "sample-A": (-5.2, -5.35, 0.6),
-    "sample-B": (-5.2, -4.65, 0.6),
+    "sample-A": (-5.45, -5.55, 0.6),
+    "sample-B": (-4.95, -5.55, 0.6),
+    "sample-C": (-5.45, -5.00, 0.6),
+    "sample-D": (-4.95, -5.00, 0.6),
+    "sample-E": (-5.45, -4.45, 0.6),
+    "sample-F": (-4.95, -4.45, 0.6),
 }
 
-DESTINATION_COORDS: Final[dict[str, Vector3]] = {
+STATION_CENTERS: Final[dict[str, Vector3]] = {
     "analyzer-01": (0.0, -5.0, 0.6),
     "quarantine-zone": (0.0, 4.0, 0.6),
     "waste-bin": (6.0, 4.0, 0.6),
 }
 
+SLOT_OFFSETS: Final[dict[str, Vector3]] = {
+    "sample-A": (-0.25, -0.55, 0.0),
+    "sample-B": (0.25, -0.55, 0.0),
+    "sample-C": (-0.25, 0.0, 0.0),
+    "sample-D": (0.25, 0.0, 0.0),
+    "sample-E": (-0.25, 0.55, 0.0),
+    "sample-F": (0.25, 0.55, 0.0),
+}
+
+DESTINATION_COORDS: Final[dict[str, dict[str, Vector3]]] = {
+    location: {
+        sample_id: (
+            center[0] + offset[0],
+            center[1] + offset[1],
+            center[2] + offset[2],
+        )
+        for sample_id, offset in SLOT_OFFSETS.items()
+    }
+    for location, center in STATION_CENTERS.items()
+}
+
 RFID_TAGS: Final[dict[str, str]] = {
-    "sample-A": "LAB:SAMPLE:A",
-    "sample-B": "LAB:SAMPLE:B",
+    sample_id: f"LAB:SAMPLE:{sample_id[-1]}" for sample_id in SAMPLE_IDS
 }
 
 REQUIRED_ENTITY_NAMES: Final[tuple[str, ...]] = (
@@ -56,8 +73,7 @@ REQUIRED_ENTITY_NAMES: Final[tuple[str, ...]] = (
     "safeexec_exchange",
     "safeexec_rfid",
     "safeexec_status",
-    "sample-A",
-    "sample-B",
+    *SAMPLE_IDS,
     "cold-storage",
     "analyzer-01",
     "waste-bin",
@@ -84,7 +100,7 @@ def resolve_location(sample_id: str, location: str) -> Vector3:
     validate_location_name(location)
     if location == "cold-storage":
         return SAMPLE_STORAGE_COORDS[sample_id]
-    return DESTINATION_COORDS[location]
+    return DESTINATION_COORDS[location][sample_id]
 
 
 def platform_target(location: str) -> Vector3:

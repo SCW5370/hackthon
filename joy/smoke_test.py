@@ -22,6 +22,7 @@ from joy.locations import (  # noqa: E402
     REQUIRED_ENTITY_NAMES,
     RFID_TAGS,
     SAMPLE_STORAGE_COORDS,
+    SAMPLE_IDS,
     resolve_location,
 )
 
@@ -83,7 +84,7 @@ def run(host: str, port: int) -> None:
         )
 
         driver.reset()
-        for sample_id in ("sample-A", "sample-B"):
+        for sample_id in SAMPLE_IDS:
             _assert_near(
                 _xyz(editor.get_location(sample_id)),
                 SAMPLE_STORAGE_COORDS[sample_id],
@@ -125,7 +126,7 @@ def run(host: str, port: int) -> None:
         _wait_for_destination(driver, "sample-A", "analyzer-01", timeout=150)
 
         driver.reset()
-        for sample_id in ("sample-A", "sample-B"):
+        for sample_id in SAMPLE_IDS:
             _assert_near(
                 _xyz(editor.get_location(sample_id)),
                 SAMPLE_STORAGE_COORDS[sample_id],

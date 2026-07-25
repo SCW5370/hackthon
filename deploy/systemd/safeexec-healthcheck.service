@@ -1,0 +1,16 @@
+[Unit]
+Description=SafeExec local service health watchdog
+After=network-online.target safeexec-runtime.service safeexec-orchestrator.service safeexec-dashboard.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/safeexec/scripts/healthcheck_x5.sh
+RuntimeDirectory=safeexec-health
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/safeexec-health
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

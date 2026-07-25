@@ -2,6 +2,8 @@
 SafeExec V1 Guard HTTP Server
 提供 REST API:
 - POST /v1/execute - 验证 Lease 后执行
+- GET /v1/events - Guard 审计事件
+- GET /v1/physical - JOY 实时物理状态
 - GET /healthz - 健康检查
 """
 from __future__ import annotations
@@ -9,8 +11,9 @@ from __future__ import annotations
 import json
 import argparse
 import threading
+import time
 from http import HTTPStatus
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from .verifier import LeaseVerifier
@@ -35,6 +38,21 @@ class SafeExecGuard:
         )
         self.executor = executor
         self._lock = threading.RLock()
+        self._executor_lock = threading.Lock()
+        self._executing = False
+        self._readiness_probe: threading.Thread | None = None
+        self._readiness_cache = {
+            "schema_version": "safeexec.guard-readiness.v1",
+            "status": "probing",
+            "ready": False,
+            "guard_id": "joy-guard-01",
+            "expected_audience": self.verifier.expected_audience,
+            "executor": {"type": "joy", "ready": False},
+            "error": "initial JOY readiness probe pending",
+            "checked_at_ms": None,
+            "auto_execute": False,
+        }
+        self._physical_cache: dict | None = None
 
         # 审计日志
         self._events = []
@@ -82,8 +100,11 @@ class SafeExecGuard:
             })
 
         # 3. 调用 Executor
+        with self._lock:
+            self._executing = True
         try:
-            exec_receipt = self.executor.execute(intent)
+            with self._executor_lock:
+                exec_receipt = self.executor.execute(intent)
 
             with self._lock:
                 self._events.append({
@@ -95,11 +116,12 @@ class SafeExecGuard:
                     "severity": "info",
                 })
 
-            return {
+            result = {
                 "status": "executed",
                 "lease_id": lease.get("lease_id"),
                 "execution": exec_receipt,
             }
+            return result
 
         except Exception as e:
             with self._lock:
@@ -117,6 +139,10 @@ class SafeExecGuard:
                 "lease_id": lease.get("lease_id"),
                 "error": str(e),
             }
+        finally:
+            with self._lock:
+                self._executing = False
+            self._schedule_readiness_probe()
 
     def get_events(self) -> list:
         with self._lock:
@@ -124,6 +150,123 @@ class SafeExecGuard:
 
     def get_stats(self) -> dict:
         return self.verifier.get_stats()
+
+    def get_physical_state(self) -> dict:
+        self._schedule_readiness_probe()
+        with self._lock:
+            physical = (
+                json.loads(json.dumps(self._physical_cache))
+                if self._physical_cache is not None
+                else None
+            )
+            error = self._readiness_cache.get("error")
+        return {
+            "status": "ok" if physical is not None else "unavailable",
+            "physical": physical,
+            **({"error": error} if physical is None and error else {}),
+        }
+
+    def readiness(self) -> dict:
+        """Return cached deep readiness and keep exactly one probe in flight."""
+        self._schedule_readiness_probe()
+        with self._lock:
+            value = json.loads(json.dumps(self._readiness_cache))
+            executing = self._executing
+        # Keep executor evidence cached, but expose the Guard host's current
+        # wall clock on every request. Runtime uses this fresh value to detect
+        # cross-device clock skew before issuing a short-lived Lease.
+        value["server_time_ms"] = int(time.time() * 1000)
+        if executing and value.get("ready"):
+            value["status"] = "executing"
+            value["executing"] = True
+            value.pop("error", None)
+            return value
+        value["executing"] = False
+        checked_at = value.get("checked_at_ms")
+        if (
+            value.get("ready")
+            and isinstance(checked_at, int)
+            and int(time.time() * 1000) - checked_at > 15_000
+        ):
+            value["status"] = "probing"
+            value["ready"] = False
+            value["error"] = "JOY readiness evidence is stale"
+        return value
+
+    def _schedule_readiness_probe(self) -> None:
+        with self._lock:
+            checked_at = self._readiness_cache.get("checked_at_ms")
+            fresh = (
+                isinstance(checked_at, int)
+                and int(time.time() * 1000) - checked_at < 5_000
+            )
+            if fresh or (
+                self._readiness_probe is not None
+                and self._readiness_probe.is_alive()
+            ):
+                return
+            self._readiness_probe = threading.Thread(
+                target=self._probe_readiness,
+                name="safeexec-joy-readiness",
+                daemon=True,
+            )
+            self._readiness_probe.start()
+
+    def _probe_readiness(self) -> None:
+        """Probe JOY off the HTTP path so slow RPC cannot block Guard health."""
+        try:
+            with self._executor_lock:
+                physical = self.executor.physical_state()
+            is_fake = isinstance(self.executor, FakeExecutor)
+            if physical is None and not is_fake:
+                raise RuntimeError("executor returned no physical state")
+            if isinstance(physical, dict) and physical.get("ok") is False:
+                raise RuntimeError(str(physical.get("error") or "JOY RPC not ready"))
+            value = {
+                "schema_version": "safeexec.guard-readiness.v1",
+                "status": "ready",
+                "ready": True,
+                "guard_id": "joy-guard-01",
+                "expected_audience": self.verifier.expected_audience,
+                "executor": {
+                    "type": "fake" if is_fake else "joy",
+                    "ready": True,
+                    "arm_state": (
+                        physical.get("arm_state")
+                        if isinstance(physical, dict)
+                        else None
+                    ),
+                    "platform_state": (
+                        physical.get("platform_state")
+                        if isinstance(physical, dict)
+                        else None
+                    ),
+                },
+                "checked_at_ms": int(time.time() * 1000),
+                "auto_execute": False,
+            }
+            with self._lock:
+                self._readiness_cache = value
+                self._physical_cache = (
+                    json.loads(json.dumps(physical))
+                    if isinstance(physical, dict)
+                    else None
+                )
+        except Exception as exc:
+            value = {
+                "schema_version": "safeexec.guard-readiness.v1",
+                "status": "unavailable",
+                "ready": False,
+                "guard_id": "joy-guard-01",
+                "expected_audience": self.verifier.expected_audience,
+                "executor": {"type": "joy", "ready": False},
+                "error": str(exc),
+                "checked_at_ms": int(time.time() * 1000),
+                "auto_execute": False,
+            }
+            with self._lock:
+                self._readiness_cache = value
+                self._physical_cache = None
 
     @staticmethod
     def _get_time() -> float:
@@ -148,8 +291,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"status": "ok"})
             return
 
+        if parsed.path == "/readyz":
+            value = _guard.readiness()
+            self._json(
+                value,
+                HTTPStatus.OK if value["ready"] else HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
         if parsed.path == "/v1/stats":
             self._json(_guard.get_stats())
+            return
+
+        if parsed.path == "/v1/events":
+            self._json({"events": _guard.get_events()})
+            return
+
+        if parsed.path == "/v1/physical":
+            self._json(_guard.get_physical_state())
             return
 
         self._error(HTTPStatus.NOT_FOUND, "Not found")
@@ -184,16 +343,24 @@ class Handler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "Not found")
 
     def _json(self, data: dict, status: int = HTTPStatus.OK):
+        payload = json.dumps(data).encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode("utf-8"))
+        self.wfile.write(payload)
+        self.wfile.flush()
+        self.close_connection = True
 
     def _error(self, status: HTTPStatus, message: str):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"error": message}).encode("utf-8"))
+        self._json({"error": message}, status)
+
+    def log_message(self, format: str, *args: object) -> None:
+        # Scheduled tasks run with pythonw.exe and have no stderr console.
+        # Audit events are recorded by SafeExecGuard, so access logging is
+        # intentionally silent here.
+        return
 
 
 def main():
@@ -233,7 +400,7 @@ def main():
         expected_audience=args.audience,
     )
 
-    server = HTTPServer((args.host, args.port), Handler)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"SafeExec Guard listening on {args.host}:{args.port}")
     print(f"[Guard] Executor: {args.executor}")
     server.serve_forever()

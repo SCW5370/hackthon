@@ -1,5 +1,6 @@
 import unittest
 
+from biolab.catalog import SAMPLE_IDS
 from joy.command import JoyCommand
 from joy.state_machine import BioLabController, TRANSFER_SEQUENCE, TransferStep
 
@@ -47,8 +48,9 @@ class JoyStateMachineTests(unittest.TestCase):
         observed = finish_active(controller)
         self.assertEqual(observed, list(TRANSFER_SEQUENCE))
         self.assertEqual(controller.sample_locations["sample-A"], "analyzer-01")
-        self.assertEqual(controller.current_dock, "home")
+        self.assertEqual(controller.current_dock, "analyzer-01")
         self.assertFalse(controller.unsafe_outcome)
+        self.assertNotIn("DRIVE_HOME", [step.value for step in observed])
 
     def test_drive_steps_emit_platform_actions(self) -> None:
         controller = BioLabController()
@@ -88,7 +90,7 @@ class JoyStateMachineTests(unittest.TestCase):
         controller.reset()
         self.assertEqual(
             controller.sample_locations,
-            {"sample-A": "cold-storage", "sample-B": "cold-storage"},
+            {sample_id: "cold-storage" for sample_id in SAMPLE_IDS},
         )
         self.assertEqual(controller.current_dock, "home")
         self.assertFalse(controller.unsafe_outcome)
@@ -102,13 +104,37 @@ class JoyStateMachineTests(unittest.TestCase):
         sample_b = BioLabController()
         sample_b.enqueue(command(sample_id="sample-B"))
         finish_active(sample_b)
-        self.assertTrue(sample_b.unsafe_outcome)
+        self.assertFalse(sample_b.unsafe_outcome)
+
+    def test_queue_runs_all_six_commands_without_exiting(self) -> None:
+        controller = BioLabController()
+        for index, sample_id in enumerate(SAMPLE_IDS):
+            controller.enqueue(command(f"cmd-{index}", sample_id))
+        for _ in SAMPLE_IDS:
+            finish_active(controller)
+        self.assertEqual(
+            controller.sample_locations,
+            {sample_id: "analyzer-01" for sample_id in SAMPLE_IDS},
+        )
+        self.assertEqual(controller.arm_state, "IDLE")
 
     def test_source_must_match_current_inventory(self) -> None:
         controller = BioLabController()
         controller.sample_locations["sample-A"] = "analyzer-01"
         with self.assertRaises(ValueError):
             controller.enqueue(command())
+
+    def test_analyzed_entity_can_be_recycled_only_while_idle(self) -> None:
+        controller = BioLabController()
+        controller.enqueue(command())
+        with self.assertRaises(RuntimeError):
+            controller.recycle("sample-A")
+        finish_active(controller)
+        result = controller.recycle("sample-A")
+        self.assertEqual(result["sample_locations"]["sample-A"], "cold-storage")
+
+        with self.assertRaises(ValueError):
+            controller.recycle("sample-A")
 
 
 if __name__ == "__main__":
