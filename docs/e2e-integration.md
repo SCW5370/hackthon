@@ -1,20 +1,25 @@
 # SafeExec V4 签名工单生产线联调
 
-本方案将 Mac 上的可信配置页、Dashboard、Orchestrator、Runtime 与 Windows 上的 Guard、JOY OF PROGRAMMING 串成一条常驻执行链。可信控制面签发结构化 WorkOrder，Agent 只提出候选动作，不能自行扩大授权。
+本方案将 Mac 上的可信配置页和 Dashboard、RDK X5 上的业务 Agent 与
+SafeExec Runtime、Windows 上的 Guard 与 JOY OF PROGRAMMING 串成一条常驻
+执行链。可信控制面签发结构化 WorkOrder，Agent 只提出候选动作，不能自行
+扩大授权。
 
 ## 架构
 
 ```text
-Config :8787/config → Signed WorkOrder
-         ↓ register + verify       ↓ activate
-Runtime :8790 ← ActionIntent v2 ← Orchestrator :8789 ← Dashboard :8787
-    ↓ Signed Action Lease
-Windows Guard :8788
-    ↓ JoyCommand
-JOY RPC :18189
+Mac Config :8787/config → Signed WorkOrder
+Mac Dashboard :8787 ─────────────────────┐
+                                        ↓
+RDK X5 Orchestrator :8789 → ActionIntent v2 → RDK X5 Runtime :8790
+                                                  ↓ Signed Action Lease
+Windows Guard :8788 → JoyCommand → JOY RPC :18189
 ```
 
-Runtime 持有 Lease 私钥；Windows Guard 只持有对应公钥。可信控制面持有另一组 WorkOrder 私钥，Runtime 只信任其公钥。
+X5 Runtime 持有 Lease 私钥；Windows Guard 只持有对应公钥。Mac 可信控制面
+持有另一组 WorkOrder 私钥，X5 Runtime 只信任其公钥。X5 上
+`safeexec-agent` 与 `safeexec-runtime` 是不同系统账号，前者不能读取 Lease
+私钥。
 
 ## 1. Windows：预先启动 JOY 与 Guard
 
@@ -34,42 +39,49 @@ py -m joy.smoke_test
 
 演示期间无需再次启动 PowerShell。Dashboard 不会创建 Windows 进程。
 
-## 2. Mac：一次启动完整服务栈
+## 2. X5：启动 Agent 与 Runtime
 
-首次运行先初始化 Python 环境和签名密钥：
+将仓库部署至 `/opt/safeexec`，准备 `.venv`、Lease 私钥、WorkOrder 公钥和
+权限为 `0600` 的 `.run/x5-agent.env`。环境文件只保存 Agent Provider 配置，
+不得提交到 Git。
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-mkdir -p .run
-.venv/bin/python scripts/gen_keys.py \
-  --private-key .run/private_key.txt \
-  --public-key .run/public_key.txt
+cd /opt/safeexec
+./scripts/install_x5_edge.sh
+./scripts/start_x5_edge.sh
 ```
 
-将 `.run/public_key.txt` 复制到 Windows 仓库的同一路径。私钥不得复制到 Windows 或提交到 Git。
+默认地址：
 
-将 `WINDOWS_IP` 替换为 Windows 的局域网或 Tailscale 地址：
+- X5 USB：`192.168.128.10`
+- Orchestrator：`http://192.168.128.10:8789`
+- Runtime：`http://192.168.128.10:8790`
+
+使用 `SAFEEXEC_GUARD_URL` 与 `LAB_LEGACY_URL` 覆盖 Windows 地址。
+
+## 3. Mac：启动可信控制面与 Dashboard
+
+Mac 只保留 WorkOrder 签名私钥，不运行 Agent 或 Runtime：
 
 ```bash
-SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
+SAFEEXEC_X5_HOST=192.168.128.10 \
+SAFEEXEC_WINDOWS_HOST=WINDOWS_IP \
+./scripts/start_edge_dashboard.sh
 ```
 
 服务地址：
 
 - Dashboard：`http://127.0.0.1:8787`
 - 可信配置：`http://127.0.0.1:8787/config`
-- Orchestrator：`http://127.0.0.1:8789`
-- Runtime：`http://127.0.0.1:8790`
 
 健康检查：
 
 ```bash
-curl http://127.0.0.1:8789/healthz
-curl http://127.0.0.1:8790/healthz
+curl http://192.168.128.10:8789/healthz
+curl http://192.168.128.10:8790/healthz
 ```
 
-## 3. V4 演示流程
+## 4. V4 演示流程
 
 依次操作：
 
@@ -100,7 +112,7 @@ sample-A,C,D,E = analyzer-01
 
 实机基线中 Guard 共接收 5 个合法请求：1 次签名复位和 4 次标准搬运；被拒绝的恶意动作没有到达 Guard。该流程约 82 秒，较原逐件回 Home 路径按同等件数估算减少约 39%。
 
-## 4. 控制与观察接口
+## 5. 控制与观察接口
 
 ```text
 GET  /v1/line/state
@@ -118,7 +130,7 @@ GET  /v1/events/stream?after=<seq>
 
 “暂停”是当前样品完成后停止调度，不是工业急停。SSE 断线重连时应携带最后收到的 `seq`。
 
-## 5. Agent Provider
+## 6. Agent Provider
 
 默认使用确定性 Function Calling Provider，便于演示复现：
 
@@ -138,24 +150,24 @@ export LLM_API_KEY
 
 两种 Provider 生成同一 `safeexec.job-manifest.v1`。OpenAI-compatible 模式还会为每个任务生成一次 `transfer_sample` Function Call；外部标签会进入不可信 Agent 会话，因此模型可能提出 `waste-bin` 候选动作。无论模型输出什么，它都不能签发 Lease，后续 Runtime、Guard 和 JOY 的接口保持不变。
 
-## 6. Fact 模式
+## 7. Fact 模式
 
-默认使用确定性 Demo Fact：
-
-```bash
-SAFEEXEC_FACT_MODE=demo
-```
-
-接入 X5 后使用：
+X5 控制核心部署使用 `config/mission_x5.yaml`。本轮不把摄像头 Fact 作为
+授权条件，Orchestrator 使用外部模式且不会伪造摄像头状态：
 
 ```bash
 SAFEEXEC_FACT_MODE=external
-SAFEEXEC_FACT_URL=http://X5_IP:PORT/path
+```
+
+后续接入摄像头时，再启用经过认证的感知适配器：
+
+```bash
+SAFEEXEC_FACT_URL=http://127.0.0.1:8790/v1/facts
 ```
 
 外部 Fact 必须包含目标、位置、采集时间和置信度；Fact 过期或不可用时系统失败关闭，不进行自动恢复。
 
-## 7. SafeExec 可插拔对照
+## 8. SafeExec 可插拔对照
 
 控制台的两种模式使用同一个 Agent、同一份工单、同一条 Prompt Injection 和同一个 JOY 场景：
 
@@ -182,7 +194,7 @@ export LAB_LEGACY_TOKEN
 
 对照演示必须先复位，再选择执行路径，然后向同一目标任务注入相同文本。保护模式会产生一次阻断和一次恢复；无保护模式不会产生 Lease 或 Guard 记录，恶意动作会抵达废弃区并触发 `UNSAFE_PHYSICAL_OUTCOME`。
 
-## 8. 故障排查
+## 9. 故障排查
 
 - Runtime 拒绝所有正常任务：检查 mission 是否加载，并确认样品 ID 为 `sample-A`～`sample-F`。
 - Guard 验签失败：确认 Runtime 与 Guard 使用相同签名密钥。

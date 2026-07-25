@@ -63,6 +63,23 @@ class JoySafeExecAdapterTests(unittest.TestCase):
             },
         )
 
+    def test_v2_work_order_binding_maps_to_same_device_command(self) -> None:
+        intent = {
+            **VALID_INTENT,
+            "schema_version": "safeexec.action.v2",
+            "work_order_id": "55ce33bb-faa3-4d45-b5d6-ccad9532b8ca",
+        }
+        self.assertEqual(
+            action_intent_to_joy(intent),
+            {
+                "command_id": VALID_INTENT["request_id"],
+                "action": "TRANSFER",
+                "sample_id": "sample-A",
+                "source": "cold-storage",
+                "destination": "analyzer-01",
+            },
+        )
+
     def test_executor_returns_safeexec_receipt(self) -> None:
         driver = FakeDriver()
         ticks = iter((0.0, 0.1, 0.2))

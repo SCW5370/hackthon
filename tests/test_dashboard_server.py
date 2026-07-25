@@ -159,6 +159,39 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(len(captured["order"].grants), 2)
 
+    def test_sensor_independent_order_has_no_camera_requirement(self) -> None:
+        private_key, _ = LeaseAuthority.generate_keypair()
+        backend = DashboardBackend(
+            orchestrator_url="http://orchestrator",
+            runtime_url="http://runtime",
+            guard_url="http://guard",
+            work_order_issuer=WorkOrderIssuer(private_key),
+            work_order_fact_mode="none",
+        )
+        captured = {}
+
+        def response(url, **kwargs):
+            if url == "http://runtime/v1/work-orders":
+                captured["order"] = WorkOrder.from_dict(kwargs["payload"])
+                return {"status": "registered", "work_order": kwargs["payload"]}
+            if url == "http://orchestrator/v1/work-orders/activate":
+                return {"status": "activated", "line": {"line_state": "STOPPED"}}
+            raise AssertionError(url)
+
+        with patch("dev.dashboard_server.json_request", side_effect=response):
+            backend.issue_work_order(
+                {
+                    "schema_version": "safeexec.work-order-draft.v1",
+                    "sample_ids": ["sample-A"],
+                    "source": "cold-storage",
+                    "destination": "analyzer-01",
+                    "subject_principal_id": "lab-agent-01",
+                    "valid_for_ms": 60_000,
+                    "operator_note": "edge controller order",
+                }
+            )
+        self.assertEqual(captured["order"].grants[0].required_facts, ())
+
 
 if __name__ == "__main__":
     unittest.main()

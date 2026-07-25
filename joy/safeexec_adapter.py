@@ -11,12 +11,12 @@ from .locations import LOCATION_NAMES, SAMPLE_IDS
 from biolab.catalog import LINE_ID, RESET_ACTION, TRANSFER_ACTION
 
 
-ACTION_SCHEMA = "safeexec.action.v1"
+ACTION_SCHEMAS = {"safeexec.action.v1", "safeexec.action.v2"}
 EXECUTION_SCHEMA = "safeexec.execution.v1"
 
 
 def action_intent_to_joy(value: Mapping[str, Any]) -> dict[str, str]:
-    expected = {
+    base_fields = {
         "schema_version",
         "request_id",
         "principal_id",
@@ -25,14 +25,25 @@ def action_intent_to_joy(value: Mapping[str, Any]) -> dict[str, str]:
         "resource",
         "arguments",
     }
+    schema_version = value.get("schema_version")
+    expected = (
+        base_fields | {"work_order_id"}
+        if schema_version == "safeexec.action.v2"
+        else base_fields
+    )
     if set(value) != expected:
         raise ValueError(
             f"invalid ActionIntent fields; "
             f"missing={sorted(expected - set(value))}, "
             f"extra={sorted(set(value) - expected)}"
         )
-    if value["schema_version"] != ACTION_SCHEMA:
+    if schema_version not in ACTION_SCHEMAS:
         raise ValueError("unsupported ActionIntent schema")
+    if schema_version == "safeexec.action.v2":
+        try:
+            uuid.UUID(str(value["work_order_id"]))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("work_order_id must be a UUID") from exc
     try:
         request_id = uuid.UUID(str(value["request_id"]))
     except (AttributeError, TypeError, ValueError) as exc:

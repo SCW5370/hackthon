@@ -84,11 +84,15 @@ class DashboardBackend:
         guard_url: str,
         runtime_url: str,
         work_order_issuer: WorkOrderIssuer | None = None,
+        work_order_fact_mode: str = "camera",
     ) -> None:
+        if work_order_fact_mode not in {"camera", "none"}:
+            raise ValueError("work_order_fact_mode must be camera or none")
         self.orchestrator_url = orchestrator_url.rstrip("/")
         self.guard_url = guard_url.rstrip("/")
         self.runtime_url = runtime_url.rstrip("/")
         self.work_order_issuer = work_order_issuer
+        self.work_order_fact_mode = work_order_fact_mode
         self._last_physical: dict[str, Any] | None = None
 
     def snapshot(self) -> dict[str, Any]:
@@ -210,6 +214,7 @@ class DashboardBackend:
             "active_work_order_id": line.get("active_work_order_id"),
             "line": line,
             "issuer": issuer,
+            "work_order_fact_mode": self.work_order_fact_mode,
         }
 
     def issue_work_order(self, value: dict[str, Any]) -> dict[str, Any]:
@@ -259,6 +264,17 @@ class DashboardBackend:
         if not isinstance(note, str) or len(note) > 500:
             raise ValueError("operator_note must contain at most 500 characters")
 
+        required_facts = (
+            [
+                {
+                    "key": "camera.healthy",
+                    "equals": True,
+                    "max_age_ms": 1500,
+                }
+            ]
+            if self.work_order_fact_mode == "camera"
+            else []
+        )
         grants = [
             {
                 "grant_id": f"work-order-{sample_id.lower()}-analysis",
@@ -268,13 +284,7 @@ class DashboardBackend:
                     "source": source,
                     "destination": destination,
                 },
-                "required_facts": [
-                    {
-                        "key": "camera.healthy",
-                        "equals": True,
-                        "max_age_ms": 1500,
-                    }
-                ],
+                "required_facts": [dict(fact) for fact in required_facts],
                 "max_executions": 1,
             }
             for sample_id in sample_ids
@@ -490,6 +500,12 @@ def main() -> None:
             "biolab-control-plane",
         ),
     )
+    parser.add_argument(
+        "--work-order-fact-mode",
+        choices=("camera", "none"),
+        default=os.environ.get("SAFEEXEC_WORK_ORDER_FACT_MODE", "camera"),
+        help="Attach camera Fact requirements or issue sensor-independent orders.",
+    )
     args = parser.parse_args()
 
     issuer = None
@@ -505,6 +521,7 @@ def main() -> None:
         runtime_url=args.runtime_url,
         guard_url=args.guard_url,
         work_order_issuer=issuer,
+        work_order_fact_mode=args.work_order_fact_mode,
     )
     print(f"SafeExec Dashboard listening on http://{args.host}:{args.port}", flush=True)
     server.serve_forever()

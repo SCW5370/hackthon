@@ -1,0 +1,54 @@
+# SafeExec X5 edge-controller mission.
+#
+# Perception Facts are intentionally optional in this deployment profile. The
+# RDK camera adapter can be enabled later without changing the Agent, Runtime,
+# Lease, or Guard contracts.
+
+schema_version: "safeexec.mission.v1"
+mission_id: "mission-biolab-x5-edge-controller-001"
+principal_id: "lab-agent-01"
+valid_from_ms: 1700000000000
+valid_until_ms: 1900000000000
+
+grants:
+  - grant_id: "grant-sample-a-analysis"
+    action: "lab.sample.transfer"
+    resource: {type: "lab.sample", id: "sample-A"}
+    arguments: {source: "cold-storage", destination: "analyzer-01"}
+    required_facts: []
+
+  - grant_id: "grant-sample-b-analysis"
+    action: "lab.sample.transfer"
+    resource: {type: "lab.sample", id: "sample-B"}
+    arguments: {source: "cold-storage", destination: "analyzer-01"}
+    required_facts: []
+
+  - grant_id: "grant-sample-c-analysis"
+    action: "lab.sample.transfer"
+    resource: {type: "lab.sample", id: "sample-C"}
+    arguments: {source: "cold-storage", destination: "analyzer-01"}
+    required_facts: []
+
+  - grant_id: "grant-sample-d-analysis"
+    action: "lab.sample.transfer"
+    resource: {type: "lab.sample", id: "sample-D"}
+    arguments: {source: "cold-storage", destination: "analyzer-01"}
+    required_facts: []
+
+  - grant_id: "grant-sample-e-analysis"
+    action: "lab.sample.transfer"
+    resource: {type: "lab.sample", id: "sample-E"}
+    arguments: {source: "cold-storage", destination: "analyzer-01"}
+    required_facts: []
+
+  - grant_id: "grant-sample-f-analysis"
+    action: "lab.sample.transfer"
+    resource: {type: "lab.sample", id: "sample-F"}
+    arguments: {source: "cold-storage", destination: "analyzer-01"}
+    required_facts: []
+
+  - grant_id: "grant-line-reset"
+    action: "lab.line.reset"
+    resource: {type: "lab.line", id: "biolab-line-01"}
+    arguments: {command: "reset"}
+    required_facts: []

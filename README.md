@@ -6,14 +6,22 @@
 ## 架构
 
 ```
-Config UI :8787/config → signed WorkOrder → Runtime :8790
-                                               ↑
-Dashboard :8787 → Orchestrator :8789 → ActionIntent v2
-                                  ├→ Runtime → Guard :8788 → JOY :18189
-                                  └→ Legacy Bridge :8791 (demo only)
+Mac trusted control plane
+Config UI :8787/config ── signed WorkOrder ──────────────┐
+Dashboard :8787 ── control / audit ────────────────┐     │
+                                                   ↓     ↓
+RDK X5 edge controller                         Orchestrator :8789
+safeexec-agent (LLM / planning) ─ ActionIntent v2 → Runtime :8790
+                                                      │ signed Lease
+                                                      ↓
+Windows device boundary                         Guard :8788 → JOY :18189
+                                                      └→ Legacy Bridge :8791
+                                                          (A/B demo only)
 ```
 
 Legacy Bridge 仅用于显式启用的无保护 A/B 演示。默认执行路径始终经过 Runtime、一次性 Lease 与 Guard。
+Mac 不运行 Agent 或 Runtime；Windows 不运行 Policy 或业务 Agent。X5 上的
+Agent 与 Runtime 使用不同 Linux 服务账号，Agent 无权读取 Lease 私钥。
 
 ## 核心组件
 
@@ -46,8 +54,10 @@ pip install pynacl pyyaml
 # 生成密钥对
 python scripts/gen_keys.py --private-key guard/keys/private_key.txt --public-key guard/keys/public_key.txt
 
-# Windows 先常驻启动 JOY 与 Guard；Mac 一次启动三服务
-SAFEEXEC_GUARD_URL=http://100.123.243.7:8788 ./scripts/start_stack.sh
+# 本地开发模式
+SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
+
+# X5 边缘控制器模式见 docs/e2e-integration.md
 
 # 打开控制台
 open http://127.0.0.1:8787
@@ -150,8 +160,11 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 
 ## 测试
 
-动态四样品实机基线：完成 4、阻断 1、恢复 1、危险动作 0；攻击可绑定
-任意尚未执行的任务。默认六样品工单仍保留用于兼容 V2 验收。
+X5 A/B 实机验收：
+
+- 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
+- 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
+- 当前测试集：76 项。
 
 ## 开发
 

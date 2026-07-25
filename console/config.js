@@ -9,6 +9,7 @@ const ui = Object.fromEntries([
   "issue-work-order-btn", "order-verification", "empty-order", "order-details",
   "active-order-id", "active-order-issuer", "active-order-subject",
   "active-order-expiry", "grant-table-body", "config-notice",
+  "work-order-facts",
 ].map(id => [id, document.getElementById(id)]));
 
 let configuration = null;
@@ -53,6 +54,10 @@ function render() {
   ui["work-order-principal"].value = policy.principal_id || "lab-agent-01";
   ui["trusted-issuer"].textContent =
     (runtime.trusted_work_order_issuers || []).join("、") || "—";
+  ui["work-order-facts"].textContent =
+    configuration.work_order_fact_mode === "none"
+      ? "本轮未启用（感知适配器可插拔）"
+      : "camera.healthy ≤ 1.5s";
   ui["config-line-state"].textContent = line.line_state || "UNKNOWN";
 
   const unsafe = line.execution_mode === "unsafe-baseline";

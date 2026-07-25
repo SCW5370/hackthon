@@ -8,6 +8,11 @@ SafeExec 是位于具身 Agent 与真实设备之间的零信任执行 Runtime�
 
 操作员用自然语言指定样品数量或对象，Agent 通过 Function Calling 生成不可变 JobManifest 并建立动态队列。运行过程中，任意尚未执行的样品都可能携带不可信标签，污染会话会提出“移入废弃区”的恶意动作。SafeExec 拒绝签发 Lease，Orchestrator 销毁污染会话、从可信工单创建干净会话并继续任务。
 
+参考部署中，业务 Agent、Orchestrator 与 SafeExec Runtime 真实运行在 RDK
+X5；Mac 只承担可信配置和审计控制面；Windows 只承担设备侧 Guard、JOY
+适配器和机械臂数字孪生。Agent 与 Runtime 使用不同系统账号，Agent 无权
+读取 Lease 私钥。
+
 ## 目标用户
 
 - 评估具身智能安全能力的黑客松评委与安全研究人员。
