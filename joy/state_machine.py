@@ -148,6 +148,23 @@ class BioLabController:
         self.paused = False
         return self.health()
 
+    def recycle(self, sample_id: str) -> dict[str, object]:
+        """Return an analyzed pool object to its input slot while fully idle."""
+
+        if sample_id not in self.sample_locations:
+            raise ValueError(f"unknown sample_id: {sample_id!r}")
+        if self.active_command is not None or self._queue:
+            raise RuntimeError("sample recycle is allowed only while JOY is idle")
+        if self.step is not TransferStep.IDLE:
+            raise RuntimeError("sample recycle is allowed only while JOY is idle")
+        if self.sample_locations[sample_id] != "analyzer-01":
+            raise ValueError(
+                f"{sample_id} is at {self.sample_locations[sample_id]!r}, "
+                "not 'analyzer-01'"
+            )
+        self.sample_locations[sample_id] = "cold-storage"
+        return self.inventory()
+
     def _begin_next(self) -> None:
         if self.active_command is None and self._queue:
             self.active_command = self._queue.popleft()

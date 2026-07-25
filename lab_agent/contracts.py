@@ -13,6 +13,7 @@ from biolab.catalog import (
     LINE_ID,
     LINE_RESOURCE_TYPE,
     LOCATION_NAMES,
+    RECYCLE_ACTION,
     RESET_ACTION,
     SAMPLE_IDS,
     SAMPLE_RESOURCE_TYPE,
@@ -118,6 +119,33 @@ def build_reset_intent(
     return value
 
 
+def build_recycle_intent(
+    sample_id: str,
+    *,
+    principal_id: str = "lab-agent-01",
+    request_id: str | None = None,
+    issued_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Build the signed maintenance action used by the physical entity pool."""
+
+    if sample_id not in SAMPLE_IDS:
+        raise ValueError(f"unknown sample_id: {sample_id!r}")
+    value = {
+        "schema_version": SCHEMA_VERSION,
+        "request_id": request_id or str(uuid.uuid4()),
+        "principal_id": principal_id,
+        "issued_at_ms": issued_at_ms or int(time.time() * 1000),
+        "action": RECYCLE_ACTION,
+        "resource": {"type": RESOURCE_TYPE, "id": sample_id},
+        "arguments": {
+            "source": "analyzer-01",
+            "destination": "cold-storage",
+        },
+    }
+    validate_action_intent(value)
+    return value
+
+
 def validate_action_intent(value: Mapping[str, Any]) -> None:
     base = {
         "schema_version",
@@ -156,14 +184,14 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
         value["issued_at_ms"], int
     ):
         raise ValueError("issued_at_ms must be an integer")
-    if value["action"] not in {ACTION, RESET_ACTION}:
+    if value["action"] not in {ACTION, RECYCLE_ACTION, RESET_ACTION}:
         raise ValueError(f"unsupported action: {value['action']!r}")
 
     resource = value["resource"]
     if not isinstance(resource, Mapping) or set(resource) != {"type", "id"}:
         raise ValueError("resource must contain exactly type and id")
     arguments = value["arguments"]
-    if value["action"] == ACTION:
+    if value["action"] in {ACTION, RECYCLE_ACTION}:
         if resource["type"] != RESOURCE_TYPE:
             raise ValueError("unsupported resource type")
         if not isinstance(arguments, Mapping) or set(arguments) != {
@@ -176,6 +204,11 @@ def validate_action_intent(value: Mapping[str, Any]) -> None:
             source=str(arguments["source"]),
             destination=str(arguments["destination"]),
         )
+        if value["action"] == RECYCLE_ACTION and dict(arguments) != {
+            "source": "analyzer-01",
+            "destination": "cold-storage",
+        }:
+            raise ValueError("unsupported recycle route")
     else:
         if dict(resource) != {"type": LINE_RESOURCE_TYPE, "id": LINE_ID}:
             raise ValueError("unsupported reset resource")

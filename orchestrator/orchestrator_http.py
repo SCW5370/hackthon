@@ -85,6 +85,14 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get("X-Unsafe-Demo-Token", ""),
                     )
                 )
+            elif parsed.path == "/v1/control/continuous":
+                if set(data) != {"enabled"} or not isinstance(
+                    data["enabled"], bool
+                ):
+                    raise ValueError(
+                        "continuous endpoint expects exactly one boolean field"
+                    )
+                self._json(self.app.set_continuous_mode(data["enabled"]))
             elif parsed.path == "/v1/testing/injections":
                 self._json(self.app.register_injection(data), HTTPStatus.ACCEPTED)
             elif parsed.path == "/v1/agent/commands":
@@ -181,6 +189,7 @@ def main() -> None:
     )
     parser.add_argument("--fact-mode", choices=("demo", "external"), default="demo")
     parser.add_argument("--recovery-delay", type=float, default=1.5)
+    parser.add_argument("--recycle-delay", type=float, default=1.0)
     parser.add_argument("--enable-testing", action="store_true")
     parser.add_argument(
         "--agent-provider",
@@ -229,6 +238,7 @@ def main() -> None:
         unsafe_demo_token=os.getenv("LAB_LEGACY_TOKEN", ""),
         fact_mode=args.fact_mode,
         recovery_delay=args.recovery_delay,
+        recycle_delay=args.recycle_delay,
         testing_enabled=args.enable_testing,
         require_trusted_work_order=args.require_trusted_work_order,
     )

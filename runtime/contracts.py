@@ -17,6 +17,7 @@ from biolab.catalog import (
     LINE_ID,
     LINE_RESOURCE_TYPE,
     LOCATION_NAMES,
+    RECYCLE_ACTION,
     RESET_ACTION,
     SAMPLE_IDS,
     SAMPLE_RESOURCE_TYPE,
@@ -46,7 +47,7 @@ class SchemaVersion(str, Enum):
 # ============================================================
 
 ALLOWED_ACTION = TRANSFER_ACTION
-ALLOWED_ACTIONS = {TRANSFER_ACTION, RESET_ACTION}
+ALLOWED_ACTIONS = {TRANSFER_ACTION, RECYCLE_ACTION, RESET_ACTION}
 ALLOWED_RESOURCE_IDS = set(SAMPLE_IDS)
 ALLOWED_POSITIONS = set(LOCATION_NAMES)
 
@@ -106,7 +107,7 @@ class ActionIntent:
             raise ValueError("resource must contain exactly type and id")
         if not isinstance(args, dict):
             raise ValueError("arguments must be an object")
-        if data["action"] == TRANSFER_ACTION:
+        if data["action"] in {TRANSFER_ACTION, RECYCLE_ACTION}:
             if resource.get("type") != SAMPLE_RESOURCE_TYPE:
                 raise ValueError(f"Invalid resource type: {resource.get('type')}")
             if resource.get("id") not in ALLOWED_RESOURCE_IDS:
@@ -121,6 +122,13 @@ class ActionIntent:
                 raise ValueError(f"Invalid destination: {args.get('destination')}")
             if args["source"] == args["destination"]:
                 raise ValueError("source and destination must differ")
+            if data["action"] == RECYCLE_ACTION and args != {
+                "source": "analyzer-01",
+                "destination": "cold-storage",
+            }:
+                raise ValueError(
+                    "recycle arguments must move analyzer-01 to cold-storage"
+                )
         else:
             if resource != {"type": LINE_RESOURCE_TYPE, "id": LINE_ID}:
                 raise ValueError("Invalid reset resource")

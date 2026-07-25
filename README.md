@@ -40,6 +40,7 @@ X5 只从显式允许列表主动发现 Guard 服务，Guard 再在 Windows 本�
 | **Endpoint Discovery** | X5 主动探测允许列表、校验 Guard audience 与 JOY 深度就绪 |
 | **Orchestrator** | 消费已验证工单、驱动 Agent 会话、攻击注入与单次恢复 |
 | **Dashboard** | 运行监控与增量审计，不签发可信授权 |
+| **Experience UI** | 面向评委与参观者的交互演示，以因果路径呈现阻断、恢复与物理结果 |
 | **Config UI** | 结构化配置并签发可信 WorkOrder |
 
 ## 安全机制
@@ -67,6 +68,7 @@ SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
 # X5 模式下，Mac 只用浏览器打开控制台
 open http://safeexec-x5.local:8787
 open http://safeexec-x5.local:8787/config
+open http://safeexec-x5.local:8787/experience
 
 # 测试
 .venv/bin/python -m unittest discover -s tests -v
@@ -153,6 +155,7 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 - `GET /v1/preflight`
 - `POST /v1/work-orders/activate`
 - `POST /v1/control/start|pause|resume|reset`
+- `POST /v1/control/continuous` - 在停止且已复位时启用固定实体池循环
 - `POST /v1/testing/injections`
 - `GET /v1/events?after=<seq>`
 - `GET /v1/events/stream?after=<seq>`
@@ -164,8 +167,20 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 - `GET /api/config`
 - `POST /api/work-orders`
 - `POST /api/control/start|pause|resume|reset`
+- `POST /api/control/continuous`
 - `POST /api/testing/injections`
+- `POST /api/experience/challenges` - 运行受限的游客攻击挑战
+- `GET /api/experience/challenges/latest`
 - `GET /api/events/stream?after=<seq>`
+
+游客挑战固定支持四种路径：提示词注入、模型幻觉、Intent 途中篡改和
+Lease 重放。前两类经过真实 Runtime；后两类复用生产 Guard 的签名、哈希绑定
+和防重放验证器，但不调用 Executor。
+
+持续模式不在运行时动态创建或删除 JOY 实体。六个物理载体完成分析后，通过
+独立的 `lab.sample.recycle` ActionIntent 走完 Policy、Lease、Guard 和 JOY
+链路后回到等候区；Orchestrator 为它生成新的 `LOT-xxxx-X` 逻辑批次并追加到
+队尾。攻击可使用 `target_task_id=next-queued` 原子绑定当时下一件待处理任务。
 
 ## 测试
 
@@ -173,7 +188,7 @@ X5 A/B 实机验收：
 
 - 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
 - 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
-- 当前测试集：84 项。
+- 当前测试集：94 项。
 
 X5 的 Dashboard、Orchestrator 与 Runtime 由 systemd 开机自启并设置为任意
 退出后自动拉起。`safeexec-healthcheck.timer` 每 10 秒检查本机健康端点，只有

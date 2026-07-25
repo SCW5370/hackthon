@@ -14,7 +14,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from biolab.catalog import SAMPLE_IDS
-from lab_agent.contracts import ActionPlan, build_action_intent, build_reset_intent
+from lab_agent.contracts import (
+    ActionPlan,
+    build_action_intent,
+    build_recycle_intent,
+    build_reset_intent,
+)
 from .job_compiler import DeterministicJobCompiler
 
 
@@ -292,6 +297,7 @@ class LineOrchestrator:
         unsafe_demo_token: str = "",
         fact_mode: str = "demo",
         recovery_delay: float = 1.5,
+        recycle_delay: float = 1.0,
         testing_enabled: bool = True,
         require_trusted_work_order: bool = False,
         sleeper: Callable[[float], None] = time.sleep,
@@ -307,6 +313,7 @@ class LineOrchestrator:
         self.execution_mode = "protected"
         self.fact_mode = fact_mode
         self.recovery_delay = recovery_delay
+        self.recycle_delay = max(0.0, recycle_delay)
         self.testing_enabled = testing_enabled
         self.require_trusted_work_order = require_trusted_work_order
         self._sleep = sleeper
@@ -319,13 +326,19 @@ class LineOrchestrator:
         self._current_task_id: str | None = None
         self._last_error: dict[str, Any] | None = None
         self._tasks: list[dict[str, Any]] = []
+        self._task_history: list[dict[str, Any]] = []
         self._injections: dict[str, dict[str, Any]] = {}
         self._injection_by_task: dict[str, str] = {}
         self._operator_commands: dict[str, dict[str, Any]] = {}
         self._counters: dict[str, int] = {}
+        self._loop_stats: dict[str, int] = {}
         self._job_manifest: dict[str, Any] = {}
         self._physical_evidence: dict[str, Any] | None = None
         self._active_work_order_id: str | None = None
+        self.continuous_mode = False
+        self._pool_size = len(SAMPLE_IDS)
+        self._cycle_index = 1
+        self._cycle_recycled = 0
         self._rebuild_line()
 
     def _rebuild_line(
@@ -361,22 +374,17 @@ class LineOrchestrator:
         task_destination = str(
             self._job_manifest.get("destination", "analyzer-01")
         )
+        self._cycle_index = 1
+        self._cycle_recycled = 0
+        self._pool_size = len(sample_ids)
+        self._task_history = []
         self._tasks = [
-            {
-                "task_id": f"task-{sample_id}",
-                "sample_id": sample_id,
-                "source": task_source,
-                "destination": task_destination,
-                "status": "QUEUED",
-                "attempt": 0,
-                "session_id": None,
-                "untrusted_input": None,
-                "intent": None,
-                "decision": None,
-                "blocked_intent": None,
-                "blocked_decision": None,
-                "error": None,
-            }
+            self._new_task(
+                sample_id,
+                task_source,
+                task_destination,
+                cycle_index=1,
+            )
             for sample_id in sample_ids
         ]
         self._current_task_id = None
@@ -388,6 +396,41 @@ class LineOrchestrator:
             "blocked_actions": 0,
             "recovered_tasks": 0,
             "unsafe_outcomes": 0,
+        }
+        self._loop_stats = {
+            "completed_cycles": 0,
+            "recycled_samples": 0,
+        }
+
+    @staticmethod
+    def _new_task(
+        sample_id: str,
+        source: str,
+        destination: str,
+        *,
+        cycle_index: int,
+    ) -> dict[str, Any]:
+        task_id = (
+            f"task-{sample_id}"
+            if cycle_index == 1
+            else f"task-cycle-{cycle_index:04d}-{sample_id}"
+        )
+        return {
+            "task_id": task_id,
+            "sample_id": sample_id,
+            "lot_id": f"LOT-{cycle_index:04d}-{sample_id[-1]}",
+            "cycle_index": cycle_index,
+            "source": source,
+            "destination": destination,
+            "status": "QUEUED",
+            "attempt": 0,
+            "session_id": None,
+            "untrusted_input": None,
+            "intent": None,
+            "decision": None,
+            "blocked_intent": None,
+            "blocked_decision": None,
+            "error": None,
         }
 
     def health(self) -> dict[str, Any]:
@@ -560,7 +603,16 @@ class LineOrchestrator:
                 "job_manifest": json.loads(json.dumps(self._job_manifest)),
                 "active_work_order_id": self._active_work_order_id,
                 "tasks": json.loads(json.dumps(self._tasks)),
+                "recent_tasks": json.loads(json.dumps(self._task_history[-24:])),
                 "counters": dict(self._counters),
+                "loop_stats": dict(self._loop_stats),
+                "continuous_mode": self.continuous_mode,
+                "entity_pool": {
+                    "strategy": "fixed-physical-pool",
+                    "size": self._pool_size,
+                    "active_cycle": self._cycle_index,
+                    "recycled_in_cycle": self._cycle_recycled,
+                },
                 "physical_evidence": json.loads(
                     json.dumps(self._physical_evidence)
                 ),
@@ -600,7 +652,27 @@ class LineOrchestrator:
             "mode": state == "STOPPED"
             and all(task["status"] == "QUEUED" for task in self._tasks)
             and not any(self._counters.values()),
+            "continuous": state == "STOPPED"
+            and all(task["status"] == "QUEUED" for task in self._tasks)
+            and not any(self._counters.values()),
         }
+
+    def set_continuous_mode(self, enabled: bool) -> dict[str, Any]:
+        with self._lock:
+            if not self._controls()["continuous"]:
+                raise ConflictError(
+                    "continuous mode can change only on a stopped, reset line"
+                )
+            self.continuous_mode = enabled
+            self._emit(
+                "line.continuous_mode.changed",
+                "orchestrator",
+                {
+                    "enabled": enabled,
+                    "entity_pool_size": self._pool_size,
+                },
+            )
+            return self.snapshot()
 
     def set_execution_mode(self, mode: str, provided_token: str = "") -> dict[str, Any]:
         if mode not in EXECUTION_MODES:
@@ -652,6 +724,7 @@ class LineOrchestrator:
                     "task_count": len(self._tasks),
                     "job_id": self._job_manifest["job_id"],
                     "execution_mode": self.execution_mode,
+                    "continuous_mode": self.continuous_mode,
                 },
             )
             self._ensure_worker()
@@ -690,6 +763,7 @@ class LineOrchestrator:
         self._assert_execution_succeeded(result, action="lab.line.reset")
         with self._lock:
             self._line_state = "STOPPED"
+            self.continuous_mode = False
             self._active_work_order_id = None
             current_manifest = json.loads(json.dumps(self._job_manifest))
             current_samples = tuple(current_manifest.get("sample_ids", SAMPLE_IDS))
@@ -776,6 +850,10 @@ class LineOrchestrator:
             "tool_call": None,
             "created_at_ms": int(time.time() * 1000),
             "valid_until_ms": order.get("valid_until_ms"),
+            "max_executions_per_sample": min(
+                int(grant.get("max_executions", 1))
+                for grant in transfer_grants
+            ),
         }
         with self._lock:
             self._active_work_order_id = work_order_id
@@ -898,15 +976,27 @@ class LineOrchestrator:
                 if existing["request"] != injection:
                     raise ConflictError("injection_id already exists with other content")
                 return self._injection_response(existing)
-            task = self._find_task(injection["target_task_id"])
+            if injection["target_task_id"] == "next-queued":
+                task = next(
+                    (
+                        item
+                        for item in self._tasks
+                        if item["status"] == "QUEUED"
+                        and not item.get("untrusted_input")
+                    ),
+                    None,
+                )
+            else:
+                task = self._find_task(injection["target_task_id"])
             if task is None:
-                raise ValidationError("unknown target_task_id")
+                raise ConflictError("no queued task is available for injection")
             if task["status"] != "QUEUED":
                 raise ConflictError("target task is no longer queued")
             if task["task_id"] in self._injection_by_task:
                 raise ConflictError("target task already has an injection")
             record = {
                 "request": injection,
+                "resolved_target_task_id": task["task_id"],
                 "state": "queued",
                 "created_at_ms": int(time.time() * 1000),
                 "updated_at_ms": int(time.time() * 1000),
@@ -939,7 +1029,7 @@ class LineOrchestrator:
             "accepted": True,
             "injection_id": record["request"]["injection_id"],
             "state": record["state"],
-            "target_task_id": record["request"]["target_task_id"],
+            "target_task_id": record["resolved_target_task_id"],
             "result": json.loads(json.dumps(record["result"])),
         }
 
@@ -1071,6 +1161,25 @@ class LineOrchestrator:
                 self._fail_task(task, "ORCHESTRATOR_FAILURE", str(exc))
                 return
             with self._lock:
+                if self._line_state == "ERROR":
+                    return
+                should_recycle = (
+                    self.continuous_mode and task["status"] == "COMPLETED"
+                )
+            if should_recycle:
+                try:
+                    self._recycle_and_requeue(task)
+                except ExecutionOutcomeUncertainError as exc:
+                    self._fail_task(
+                        task,
+                        "RECYCLE_OUTCOME_UNKNOWN",
+                        str(exc),
+                    )
+                    return
+                except Exception as exc:
+                    self._fail_task(task, "RECYCLE_FAILURE", str(exc))
+                    return
+            with self._lock:
                 self._current_task_id = None
                 if self._line_state == "ERROR":
                     return
@@ -1082,6 +1191,83 @@ class LineOrchestrator:
                         {"after_task": task["task_id"]},
                     )
                     return
+
+    def _recycle_and_requeue(self, task: dict[str, Any]) -> None:
+        """Recycle one physical carrier, then append its next logical lot."""
+
+        if self.recycle_delay:
+            self._sleep(self.recycle_delay)
+        sample_id = str(task["sample_id"])
+        with self._lock:
+            self._emit(
+                "sample.retiring",
+                "orchestrator",
+                {
+                    "task_id": task["task_id"],
+                    "lot_id": task["lot_id"],
+                    "sample_id": sample_id,
+                    "from": "analyzer-01",
+                },
+            )
+        result = self.runtime.submit_action(build_recycle_intent(sample_id))
+        self._assert_execution_succeeded(result, action="lab.sample.recycle")
+        with self._lock:
+            self._record_physical_from_response(
+                result,
+                fallback_dock="analyzer-01",
+            )
+            completed = json.loads(json.dumps(task))
+            completed["retired_at_ms"] = int(time.time() * 1000)
+            self._task_history.append(completed)
+            if len(self._task_history) > 48:
+                self._task_history = self._task_history[-48:]
+            self._tasks = [item for item in self._tasks if item is not task]
+            old_task_id = str(task["task_id"])
+            self._injection_by_task.pop(old_task_id, None)
+            self._loop_stats["recycled_samples"] += 1
+            self._cycle_recycled += 1
+            self._emit(
+                "sample.recycled",
+                "guard",
+                {
+                    "task_id": old_task_id,
+                    "lot_id": task["lot_id"],
+                    "sample_id": sample_id,
+                    "destination": "cold-storage",
+                    "path": "Policy→Lease→Guard→JOY",
+                },
+            )
+            if self._cycle_recycled >= self._pool_size:
+                completed_cycle = self._cycle_index
+                self._loop_stats["completed_cycles"] += 1
+                self._cycle_index += 1
+                self._cycle_recycled = 0
+                self._emit(
+                    "line.cycle.completed",
+                    "orchestrator",
+                    {
+                        "cycle_index": completed_cycle,
+                        "completed_tasks": self._counters["completed_tasks"],
+                        "unsafe_outcomes": self._counters["unsafe_outcomes"],
+                    },
+                )
+            next_task = self._new_task(
+                sample_id,
+                str(task["source"]),
+                str(task["destination"]),
+                cycle_index=int(task["cycle_index"]) + 1,
+            )
+            self._tasks.append(next_task)
+            self._emit(
+                "task.queued",
+                "orchestrator",
+                {
+                    "task_id": next_task["task_id"],
+                    "lot_id": next_task["lot_id"],
+                    "sample_id": sample_id,
+                    "cycle_index": next_task["cycle_index"],
+                },
+            )
 
     def _process_task(self, task: dict[str, Any]) -> None:
         injection_id = self._injection_by_task.get(task["task_id"])

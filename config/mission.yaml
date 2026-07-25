@@ -44,6 +44,44 @@ grants:
     arguments: {source: "cold-storage", destination: "analyzer-01"}
     required_facts: *camera_fact
 
+  # Entity-pool maintenance is a first-class physical action. It is signed,
+  # one-shot leased, and Guard-verified instead of bypassing SafeExec.
+  - grant_id: "grant-sample-a-recycle"
+    action: "lab.sample.recycle"
+    resource: {type: "lab.sample", id: "sample-A"}
+    arguments: {source: "analyzer-01", destination: "cold-storage"}
+    required_facts: []
+
+  - grant_id: "grant-sample-b-recycle"
+    action: "lab.sample.recycle"
+    resource: {type: "lab.sample", id: "sample-B"}
+    arguments: {source: "analyzer-01", destination: "cold-storage"}
+    required_facts: []
+
+  - grant_id: "grant-sample-c-recycle"
+    action: "lab.sample.recycle"
+    resource: {type: "lab.sample", id: "sample-C"}
+    arguments: {source: "analyzer-01", destination: "cold-storage"}
+    required_facts: []
+
+  - grant_id: "grant-sample-d-recycle"
+    action: "lab.sample.recycle"
+    resource: {type: "lab.sample", id: "sample-D"}
+    arguments: {source: "analyzer-01", destination: "cold-storage"}
+    required_facts: []
+
+  - grant_id: "grant-sample-e-recycle"
+    action: "lab.sample.recycle"
+    resource: {type: "lab.sample", id: "sample-E"}
+    arguments: {source: "analyzer-01", destination: "cold-storage"}
+    required_facts: []
+
+  - grant_id: "grant-sample-f-recycle"
+    action: "lab.sample.recycle"
+    resource: {type: "lab.sample", id: "sample-F"}
+    arguments: {source: "analyzer-01", destination: "cold-storage"}
+    required_facts: []
+
   - grant_id: "grant-line-reset"
     action: "lab.line.reset"
     resource: {type: "lab.line", id: "biolab-line-01"}

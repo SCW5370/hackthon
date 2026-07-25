@@ -18,6 +18,7 @@ LINE_ID: Final[str] = "biolab-line-01"
 LINE_RESOURCE_TYPE: Final[str] = "lab.line"
 SAMPLE_RESOURCE_TYPE: Final[str] = "lab.sample"
 TRANSFER_ACTION: Final[str] = "lab.sample.transfer"
+RECYCLE_ACTION: Final[str] = "lab.sample.recycle"
 RESET_ACTION: Final[str] = "lab.line.reset"
 DISPLAY_LOCATION_NAMES: Final[dict[str, str]] = {
     "cold-storage": "等候区",

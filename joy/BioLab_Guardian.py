@@ -244,6 +244,20 @@ def _parse_transfer_request(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Jo
     return JoyCommand.from_mapping(value)
 
 
+def _parse_recycle_request(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> str:
+    if len(args) == 1 and not kwargs and isinstance(args[0], dict):
+        value = args[0]
+    elif not args and isinstance(kwargs.get("request"), dict):
+        value = kwargs["request"]
+    else:
+        raise ValueError("recycle expects exactly one request object")
+    if set(value) != {"sample_id"} or value["sample_id"] not in SAMPLE_IDS:
+        raise ValueError("recycle requires one known sample_id")
+    return str(value["sample_id"])
+
+
 def _handle_rpc(sender: DataExchange, request: Any) -> None:
     name = request.func_name
     try:
@@ -254,6 +268,14 @@ def _handle_rpc(sender: DataExchange, request: Any) -> None:
         elif name == "transfer":
             command = _parse_transfer_request(request.args, request.kwargs)
             result = controller.enqueue(command)
+        elif name == "recycle":
+            sample_id = _parse_recycle_request(request.args, request.kwargs)
+            result = controller.recycle(sample_id)
+            editor.set_location(sample_id, SAMPLE_STORAGE_COORDS[sample_id])
+            result["recycled_sample_id"] = sample_id
+            result["current_dock"] = controller.current_dock
+            result["arm_state"] = controller.arm_state
+            result["platform_state"] = controller.platform_state
         elif name == "pause":
             result = controller.pause()
             env.set_time_dilation(0.05)

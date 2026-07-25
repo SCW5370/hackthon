@@ -174,6 +174,7 @@ POST /v1/control/reset
 POST /v1/control/mode
 POST /v1/testing/injections
 GET  /v1/testing/injections/{id}
+POST /v1/control/continuous
 GET  /v1/events?after=<seq>
 GET  /v1/events/stream?after=<seq>
 ```

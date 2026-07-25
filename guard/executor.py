@@ -9,7 +9,7 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Any, TYPE_CHECKING
 
-from biolab.catalog import RESET_ACTION, TRANSFER_ACTION
+from biolab.catalog import RECYCLE_ACTION, RESET_ACTION, TRANSFER_ACTION
 if TYPE_CHECKING:
     from runtime.contracts import ActionIntent
 
@@ -72,7 +72,11 @@ class FakeExecutor(BaseExecutor):
         command_id = intent.get("request_id", "unknown")
         original_action = intent.get("action", "")
         # 映射到 JoyCommand action
-        action = "TRANSFER" if original_action == TRANSFER_ACTION else "RESET"
+        action = {
+            TRANSFER_ACTION: "TRANSFER",
+            RECYCLE_ACTION: "RECYCLE",
+            RESET_ACTION: "RESET",
+        }.get(original_action, "UNKNOWN")
         resource_id = intent.get("resource", {}).get("id", "")
         source = intent.get("arguments", {}).get("source", "")
         destination = intent.get("arguments", {}).get("destination", "")

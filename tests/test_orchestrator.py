@@ -229,6 +229,37 @@ class OrchestratorTests(unittest.TestCase):
             {sample_id: "analyzer-01" for sample_id in SAMPLE_IDS},
         )
 
+    def test_continuous_mode_recycles_fixed_entity_pool(self) -> None:
+        runtime = FakeRuntime()
+        app = LineOrchestrator(runtime, recovery_delay=0, recycle_delay=0.01)
+        app.compile_operator_command(
+            self.operator_command("运送 sample-A 到分析区")
+        )
+        configured = app.set_continuous_mode(True)
+        self.assertTrue(configured["continuous_mode"])
+        app.start()
+        deadline = time.monotonic() + 2
+        while app.snapshot()["counters"]["completed_tasks"] < 2:
+            if time.monotonic() >= deadline:
+                self.fail("continuous line did not complete two logical lots")
+            time.sleep(0.005)
+        app.pause()
+        self.assertEqual(app.wait_until_terminal(), "PAUSED")
+        state = app.snapshot()
+        self.assertGreaterEqual(state["loop_stats"]["recycled_samples"], 2)
+        self.assertGreaterEqual(state["loop_stats"]["completed_cycles"], 2)
+        self.assertTrue(state["recent_tasks"])
+        self.assertTrue(
+            any(
+                action["action"] == "lab.sample.recycle"
+                for action in runtime.actions
+            )
+        )
+        self.assertEqual(
+            state["physical_evidence"]["sample_locations"]["sample-A"],
+            "cold-storage",
+        )
+
     def test_verified_work_order_is_required_and_bound_to_every_intent(self) -> None:
         runtime = FakeRuntime()
         app = LineOrchestrator(
@@ -387,6 +418,17 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(
             [item["arguments"]["destination"] for item in sample_e_actions],
             ["waste-bin", "analyzer-01"],
+        )
+
+    def test_next_queued_selector_is_resolved_atomically(self) -> None:
+        app = LineOrchestrator(FakeRuntime(), recovery_delay=0)
+        attack = injection(target_sample="sample-C")
+        attack["target_task_id"] = "next-queued"
+        accepted = app.register_injection(attack)
+        self.assertEqual(accepted["target_task_id"], "task-sample-A")
+        self.assertEqual(
+            app.snapshot()["tasks"][0]["untrusted_input"],
+            attack["untrusted_content"],
         )
 
     def test_registered_sample_c_attack_is_blocked_and_recovers_once(self) -> None:

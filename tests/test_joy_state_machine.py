@@ -124,6 +124,18 @@ class JoyStateMachineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             controller.enqueue(command())
 
+    def test_analyzed_entity_can_be_recycled_only_while_idle(self) -> None:
+        controller = BioLabController()
+        controller.enqueue(command())
+        with self.assertRaises(RuntimeError):
+            controller.recycle("sample-A")
+        finish_active(controller)
+        result = controller.recycle("sample-A")
+        self.assertEqual(result["sample_locations"]["sample-A"], "cold-storage")
+
+        with self.assertRaises(ValueError):
+            controller.recycle("sample-A")
+
 
 if __name__ == "__main__":
     unittest.main()

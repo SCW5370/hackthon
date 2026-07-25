@@ -22,6 +22,7 @@ class FakeDriver:
         self.transfers: list[tuple[str, str, str, str]] = []
         self.location = "cold-storage"
         self.reset_count = 0
+        self.recycle_count = 0
 
     def transfer(
         self,
@@ -46,6 +47,11 @@ class FakeDriver:
 
     def reset(self) -> dict[str, object]:
         self.reset_count += 1
+        self.location = "cold-storage"
+        return self.health()
+
+    def recycle(self, sample_id: str) -> dict[str, object]:
+        self.recycle_count += 1
         self.location = "cold-storage"
         return self.health()
 
@@ -131,6 +137,24 @@ class JoySafeExecAdapterTests(unittest.TestCase):
         self.assertEqual(receipt["state"], "succeeded")
         self.assertTrue(receipt["result"]["reset"])
         self.assertEqual(driver.reset_count, 1)
+
+    def test_signed_recycle_returns_pool_entity_to_input(self) -> None:
+        driver = FakeDriver()
+        driver.location = "analyzer-01"
+        executor = JoyExecutor(driver, now_ms=lambda: 1784800001000)  # type: ignore[arg-type]
+        intent = {
+            **VALID_INTENT,
+            "action": "lab.sample.recycle",
+            "arguments": {
+                "source": "analyzer-01",
+                "destination": "cold-storage",
+            },
+        }
+        receipt = executor.execute(intent)
+        self.assertEqual(receipt["state"], "succeeded")
+        self.assertTrue(receipt["result"]["recycled"])
+        self.assertEqual(receipt["result"]["location"], "cold-storage")
+        self.assertEqual(driver.recycle_count, 1)
 
 
 if __name__ == "__main__":
