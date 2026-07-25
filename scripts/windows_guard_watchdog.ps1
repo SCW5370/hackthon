@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$GuardTaskName = "SafeExec Guard",
+    [string]$BioLabTaskName = "SafeExec BioLab Twin",
     [int]$FailureThreshold = 2
 )
 
@@ -9,6 +10,40 @@ $RepoRoot = (Resolve-Path $RepoRoot).Path
 $RunDir = Join-Path $RepoRoot ".run"
 $FailureFile = Join-Path $RunDir "guard-watchdog-failures.txt"
 New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
+
+$Joy = Get-Process -Name "JoyOfProgramming-Win64-Shipping" `
+    -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($null -eq $Joy) {
+    # JOY is interactive and must be reopened by the operator.
+    Remove-Item $FailureFile -ErrorAction SilentlyContinue
+    exit 0
+}
+
+$BioLab = Get-CimInstance Win32_Process |
+    Where-Object {
+        $_.Name -match "^pythonw?\.exe$" -and
+        $_.CommandLine -like "*BioLab_Guardian.py*"
+    } |
+    Select-Object -First 1
+$BioLabConnected = $false
+if ($null -ne $BioLab) {
+    $BioLabConnected = $null -ne (
+        Get-NetTCPConnection `
+            -OwningProcess $BioLab.ProcessId `
+            -RemotePort 18189 `
+            -State Established `
+            -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    )
+}
+if (-not $BioLabConnected) {
+    Stop-ScheduledTask -TaskName $BioLabTaskName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    Start-ScheduledTask -TaskName $BioLabTaskName
+    Remove-Item $FailureFile -ErrorAction SilentlyContinue
+    exit 0
+}
 
 try {
     $Status = Invoke-RestMethod `
@@ -20,18 +55,6 @@ try {
     }
 } catch {
     # Count the failure below.
-}
-
-$BioLab = Get-CimInstance Win32_Process |
-    Where-Object {
-        $_.Name -like "python*" -and
-        $_.CommandLine -like "*BioLab_Guardian.py*"
-    } |
-    Select-Object -First 1
-if ($null -eq $BioLab) {
-    # JOY scene is absent; restarting Guard cannot repair that condition.
-    Remove-Item $FailureFile -ErrorAction SilentlyContinue
-    exit 0
 }
 
 $Failures = 0

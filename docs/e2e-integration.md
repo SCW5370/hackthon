@@ -57,7 +57,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_watchdo
 
 该任务直接托管 Guard 前台进程，每分钟最多重试一次；它不会启动 JOY、不会
 绕过 Guard，也不会自动执行任何动作。看门狗每分钟读取一次 Guard
-`/readyz`，仅在 BioLab 进程存在且连续两次失败时重启 Guard。
+`/readyz`；若 JOY 已打开但 BioLab 进程未连接，会先重启 BioLab；仅在
+BioLab 已连接且 Guard 连续两次失败时才重启 Guard。
 
 BioLab 数字孪生脚本也可独立托管；它会在 JOY 尚未就绪时等待或由任务计划
 程序重试。Guard 与 BioLab 优先使用 JOY 附带的 `pythonw.exe`，后台运行时
