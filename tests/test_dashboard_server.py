@@ -30,6 +30,8 @@ class DashboardServerTests(unittest.TestCase):
         def response(url, **_kwargs):
             if url == "http://orchestrator/v1/line/state":
                 return line
+            if url == "http://orchestrator/v1/preflight":
+                return {"status": "ready", "ready": True}
             if url == "http://guard/v1/physical":
                 return {"status": "ok", "physical": physical}
             raise AssertionError(url)
@@ -39,6 +41,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(value["line"], line)
         self.assertEqual(value["physical"], physical)
         self.assertEqual(value["physical_status"], "live")
+        self.assertTrue(value["preflight"]["ready"])
 
     def test_busy_guard_uses_last_physical_evidence_without_polling(self) -> None:
         self.backend._last_physical = {"arm_state": "MOVING"}
@@ -53,7 +56,7 @@ class DashboardServerTests(unittest.TestCase):
             value = self.backend.snapshot()
         self.assertEqual(value["physical_status"], "cached")
         self.assertEqual(value["physical"]["arm_state"], "MOVING")
-        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(mocked.call_count, 2)
 
     def test_busy_snapshot_merges_confirmed_execution_receipt_inventory(self) -> None:
         self.backend._last_physical = {
@@ -85,7 +88,7 @@ class DashboardServerTests(unittest.TestCase):
             value["physical"]["sample_locations"]["sample-B"],
             "analyzer-01",
         )
-        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(mocked.call_count, 2)
 
     def test_execution_mode_is_forwarded_to_orchestrator(self) -> None:
         with patch(
@@ -109,6 +112,7 @@ class DashboardServerTests(unittest.TestCase):
         source = Path("console/dashboard.js").read_text(encoding="utf-8")
         self.assertIn('ui[id].textContent', source)
         self.assertNotIn("innerHTML", source)
+        self.assertIn("renderPreflight", source)
 
     def test_trusted_configuration_is_a_separate_page(self) -> None:
         dashboard = Path("console/index.html").read_text(encoding="utf-8")

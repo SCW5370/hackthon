@@ -21,23 +21,31 @@ X5 Runtime 持有 Lease 私钥；Windows Guard 只持有对应公钥。Mac 可�
 `safeexec-agent` 与 `safeexec-runtime` 是不同系统账号，前者不能读取 Lease
 私钥。
 
+X5 不扫描 Windows 进程，也不直接连接 JOY RPC。Runtime 只探测
+`/etc/safeexec/runtime.env` 中明确允许的 Guard 服务；Guard 在 Windows 本机
+负责连接和重连 JOY。发现成功只代表链路就绪，不会自动启动生产线。
+
 ## 1. Windows：预先启动 JOY 与 Guard
 
-打开 JOY OF PROGRAMMING 并进入 BioLab 场景，然后在仓库目录执行：
+打开 JOY OF PROGRAMMING 并进入 Level Editor，然后在仓库目录执行一次：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start_biolab.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\start_windows_guard.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start_windows_demo.ps1
 ```
 
-确认 Guard，并通过 JOY 冒烟测试检查 `18189` RPC：
+该脚本在后台启动常驻 BioLab 与 Guard，等待 JOY 深度就绪。无保护 A/B
+桥默认不启动；需要时必须显式传入 `-EnableUnsafeBaseline -UnsafeToken`。
+
+确认 Guard 与 JOY，而不只检查 HTTP 进程存活：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8788/healthz
+Invoke-RestMethod http://127.0.0.1:8788/readyz
 py -m joy.smoke_test
 ```
 
-演示期间无需再次启动 PowerShell。Dashboard 不会创建 Windows 进程。
+Guard 可先于 JOY 场景启动；场景重启后会自动重连。演示期间无需再次启动
+PowerShell，Dashboard 也不会创建 Windows 进程。
 
 ## 2. X5：启动 Agent 与 Runtime
 
@@ -51,13 +59,24 @@ cd /opt/safeexec
 ./scripts/start_x5_edge.sh
 ```
 
+安装脚本创建并启用 `safeexec-runtime.service` 与
+`safeexec-orchestrator.service`。板子重启后两项服务自动恢复，但生产线保持
+停止，不会自动执行上次任务。
+
 默认地址：
 
 - X5 USB：`192.168.128.10`
 - Orchestrator：`http://192.168.128.10:8789`
 - Runtime：`http://192.168.128.10:8790`
 
-使用 `SAFEEXEC_GUARD_URL` 与 `LAB_LEGACY_URL` 覆盖 Windows 地址。
+Guard 允许列表位于 `/etc/safeexec/runtime.env`，例如：
+
+```text
+SAFEEXEC_GUARD_CANDIDATES=http://WINDOWS_LAN_IP:8788,http://WINDOWS_TAILSCALE_IP:8788
+```
+
+候选按顺序选择；未通过 `/readyz`、audience 不匹配或 JOY 未响应的服务不会
+成为执行端。`LAB_LEGACY_URL` 仅配置显式不安全的对照桥。
 
 ## 3. Mac：启动可信控制面与 Dashboard
 
@@ -79,7 +98,12 @@ SAFEEXEC_WINDOWS_HOST=WINDOWS_IP \
 ```bash
 curl http://192.168.128.10:8789/healthz
 curl http://192.168.128.10:8790/healthz
+./scripts/preflight_demo.sh
 ```
+
+`healthz` 仅证明进程存活。`preflight_demo.sh` 检查
+`Mac → X5 Orchestrator → Runtime → Windows Guard → JOY` 全链路。可信工单
+尚未激活时，设备组件可以全部为绿色，但“开始”仍保持锁定。
 
 ## 4. V4 演示流程
 
@@ -116,6 +140,7 @@ sample-A,C,D,E = analyzer-01
 
 ```text
 GET  /v1/line/state
+GET  /v1/preflight
 POST /v1/agent/commands
 POST /v1/control/start
 POST /v1/control/pause
@@ -129,6 +154,10 @@ GET  /v1/events/stream?after=<seq>
 ```
 
 “暂停”是当前样品完成后停止调度，不是工业急停。SSE 断线重连时应携带最后收到的 `seq`。
+
+Runtime 还提供 `GET /readyz`。如果 Guard 或 JOY 不可用，动作会在 Lease
+签发前以 `EXECUTOR_UNAVAILABLE` 失败关闭；连接恢复后不会自动继续旧任务，
+需要操作员检查并执行签名复位。
 
 ## 6. Agent Provider
 
@@ -199,5 +228,9 @@ export LAB_LEGACY_TOKEN
 - Runtime 拒绝所有正常任务：检查 mission 是否加载，并确认样品 ID 为 `sample-A`～`sample-F`。
 - Guard 验签失败：确认 Runtime 与 Guard 使用相同签名密钥。
 - JOY 无动作：确认游戏仍停留在 BioLab 场景，RPC 端口为 `18189`。
+- X5 未发现 Guard：检查 `/etc/safeexec/runtime.env`，再查询 Runtime
+  `/readyz` 中每个候选地址的错误。
+- `healthz` 正常但无法开始：查询 `/v1/preflight`；通常是 JOY 未深度就绪
+  或尚未激活可信工单。
 - Dashboard 没有实时事件：检查 Orchestrator `8789`，而不是直接检查 Runtime。
 - 队列进入 `ERROR`：查看 Dashboard 审计抽屉；Fact 过期、Guard 离线和 JOY 失败都会失败关闭。

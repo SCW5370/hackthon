@@ -1,0 +1,24 @@
+[Unit]
+Description=SafeExec embodied Agent Orchestrator
+After=network-online.target safeexec-runtime.service
+Wants=network-online.target
+Requires=safeexec-runtime.service
+
+[Service]
+Type=simple
+User=safeexec-agent
+Group=safeexec-agent
+WorkingDirectory=/opt/safeexec
+Environment=SAFEEXEC_ROOT=/opt/safeexec
+EnvironmentFile=-/opt/safeexec/.run/x5-agent.env
+ExecStart=/opt/safeexec/scripts/run_x5_orchestrator.sh
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

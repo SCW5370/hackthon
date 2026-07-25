@@ -44,10 +44,11 @@ mutation.
 ## Generate and start the level
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_biolab.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start_windows_demo.ps1
 ```
 
-This starts `joy\BioLab_Guardian.py` in the background. It selects
+This starts `joy\BioLab_Guardian.py` and the device-side Guard in the
+background, then waits for `http://127.0.0.1:8788/readyz`. It selects
 `MinimalisticIndoor`, creates `sample-A` through `sample-F` in a 2×3 waiting
 grid, assigns unique colors, RFID tags, and destination slots, registers the
 six RPCs, and starts the non-blocking arm state machine. Completed samples do
@@ -65,6 +66,17 @@ Stop only the background level runtime with:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\stop_biolab.ps1
 ```
+
+Stop the complete Windows device side with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\stop_windows_demo.ps1
+```
+
+The Guard uses a cached background JOY probe so an 8-second pyjop response
+cannot block HTTP liveness. It reconnects after the level restarts. X5 discovers
+this Guard service from an explicit allow-list; discovery never executes a
+command.
 
 ## Reproduce the scenarios
 

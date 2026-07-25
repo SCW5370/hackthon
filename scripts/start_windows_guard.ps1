@@ -25,6 +25,24 @@ if (Test-Path -LiteralPath $pidFile) {
     Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
 }
 
+$listener = Get-NetTCPConnection -LocalPort $Port -State Listen `
+    -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($listener) {
+    try {
+        $health = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:$Port/healthz" `
+            -TimeoutSec 2
+        if ($health.status -eq "ok") {
+            Set-Content -LiteralPath $pidFile -Value $listener.OwningProcess
+            Write-Host "SafeExec Guard is already serving (PID $($listener.OwningProcess))."
+            exit 0
+        }
+    } catch {
+        throw "Port $Port is occupied by PID $($listener.OwningProcess), but Guard health failed."
+    }
+}
+
 $joy = Get-Process -Name "JoyOfProgramming-Win64-Shipping" |
     Select-Object -First 1
 if (-not $joy -or -not $joy.Path) {

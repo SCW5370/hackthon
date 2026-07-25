@@ -22,6 +22,8 @@ Windows device boundary                         Guard :8788 → JOY :18189
 Legacy Bridge 仅用于显式启用的无保护 A/B 演示。默认执行路径始终经过 Runtime、一次性 Lease 与 Guard。
 Mac 不运行 Agent 或 Runtime；Windows 不运行 Policy 或业务 Agent。X5 上的
 Agent 与 Runtime 使用不同 Linux 服务账号，Agent 无权读取 Lease 私钥。
+X5 只从显式允许列表主动发现 Guard 服务，Guard 再在 Windows 本机连接 JOY。
+发现设备只更新就绪状态，不会自动授权或执行动作。
 
 ## 核心组件
 
@@ -33,6 +35,7 @@ Agent 与 Runtime 使用不同 Linux 服务账号，Agent 无权读取 Lease 私
 | **Lease Authority** | Ed25519 签名签发 5 秒 Lease |
 | **Fact Hub** | 存储摄像头等实时状态，支持 TTL 过期 |
 | **Guard** | 验签 + SQLite 防重放 + 执行拦截 |
+| **Endpoint Discovery** | X5 主动探测允许列表、校验 Guard audience 与 JOY 深度就绪 |
 | **Orchestrator** | 消费已验证工单、驱动 Agent 会话、攻击注入与单次恢复 |
 | **Dashboard** | 运行监控与增量审计，不签发可信授权 |
 | **Config UI** | 结构化配置并签发可信 WorkOrder |
@@ -132,6 +135,7 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 - `GET /v1/state` - 当前 Fact 与最近一次动作摘要
 - `GET /v1/events` - 审计事件流
 - `GET /healthz` - 健康检查
+- `GET /readyz` - Runtime、Guard 与设备执行端的深度就绪状态
 
 ### Guard
 
@@ -139,10 +143,12 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 - `GET /v1/events` - Guard 审计事件
 - `GET /v1/physical` - JOY 当前物理状态
 - `GET /healthz` - 健康检查
+- `GET /readyz` - Guard 与本地 JOY RPC 的缓存深度检查
 
 ### Orchestrator
 
 - `GET /v1/line/state`
+- `GET /v1/preflight`
 - `POST /v1/work-orders/activate`
 - `POST /v1/control/start|pause|resume|reset`
 - `POST /v1/testing/injections`
@@ -151,7 +157,8 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 
 ### Dashboard
 
-- `GET /api/dashboard/v2`（响应 schema 为 `safeexec.dashboard.v3`）
+- `GET /api/dashboard/v2`（响应 schema 为 `safeexec.dashboard.v4`）
+- `GET /api/preflight`
 - `GET /api/config`
 - `POST /api/work-orders`
 - `POST /api/control/start|pause|resume|reset`
@@ -164,7 +171,7 @@ X5 A/B 实机验收：
 
 - 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
 - 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
-- 当前测试集：76 项。
+- 当前测试集：81 项。
 
 ## 开发
 

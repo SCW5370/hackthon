@@ -65,6 +65,17 @@ class FakeJoyBackend:
         }
 
 
+class UnavailableDiscovery:
+    def require_ready(self):
+        raise ConnectionError("JOY offline")
+
+    def set_executing(self, _value):
+        pass
+
+    def refresh(self):
+        return {"ready": False}
+
+
 class SafeExecEndToEndTests(unittest.TestCase):
     def test_agent_runtime_guard_contract_allows_only_granted_action(self):
         private_key, public_key = LeaseAuthority.generate_keypair()
@@ -147,6 +158,38 @@ class SafeExecEndToEndTests(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError):
             executor.execute(intent)
+
+    def test_unavailable_executor_fails_before_lease_and_guard(self):
+        private_key, public_key = LeaseAuthority.generate_keypair()
+        executor = FakeExecutor()
+        runtime = InProcessRuntime(
+            mission(),
+            private_key,
+            SafeExecGuard(public_key, executor),
+        )
+        runtime.guard_discovery = UnavailableDiscovery()
+        runtime.add_fact(
+            Fact(
+                key="camera.healthy",
+                value=True,
+                source="rdk-camera",
+                confidence=1.0,
+                timestamp=time.time(),
+                ttl_ms=1500,
+            ).to_dict()
+        )
+        result = runtime.process_action(
+            build_action_intent(
+                ActionPlan("sample-A", "cold-storage", "analyzer-01")
+            )
+        )
+        self.assertEqual(result["status"], "denied")
+        self.assertEqual(
+            result["decision"]["reason_code"],
+            "EXECUTOR_UNAVAILABLE",
+        )
+        self.assertNotIn("lease", result)
+        self.assertEqual(executor.call_count, 0)
 
 
 if __name__ == "__main__":

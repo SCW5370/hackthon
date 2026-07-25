@@ -11,8 +11,9 @@ from __future__ import annotations
 import json
 import argparse
 import threading
+import time
 from http import HTTPStatus
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from .verifier import LeaseVerifier
@@ -37,6 +38,20 @@ class SafeExecGuard:
         )
         self.executor = executor
         self._lock = threading.RLock()
+        self._executor_lock = threading.Lock()
+        self._readiness_probe: threading.Thread | None = None
+        self._readiness_cache = {
+            "schema_version": "safeexec.guard-readiness.v1",
+            "status": "probing",
+            "ready": False,
+            "guard_id": "joy-guard-01",
+            "expected_audience": self.verifier.expected_audience,
+            "executor": {"type": "joy", "ready": False},
+            "error": "initial JOY readiness probe pending",
+            "checked_at_ms": None,
+            "auto_execute": False,
+        }
+        self._physical_cache: dict | None = None
 
         # 审计日志
         self._events = []
@@ -85,7 +100,8 @@ class SafeExecGuard:
 
         # 3. 调用 Executor
         try:
-            exec_receipt = self.executor.execute(intent)
+            with self._executor_lock:
+                exec_receipt = self.executor.execute(intent)
 
             with self._lock:
                 self._events.append({
@@ -97,11 +113,13 @@ class SafeExecGuard:
                     "severity": "info",
                 })
 
-            return {
+            result = {
                 "status": "executed",
                 "lease_id": lease.get("lease_id"),
                 "execution": exec_receipt,
             }
+            self._schedule_readiness_probe()
+            return result
 
         except Exception as e:
             with self._lock:
@@ -128,18 +146,110 @@ class SafeExecGuard:
         return self.verifier.get_stats()
 
     def get_physical_state(self) -> dict:
-        try:
-            physical = self.executor.physical_state()
-        except Exception as exc:
-            return {
-                "status": "unavailable",
-                "physical": None,
-                "error": str(exc),
-            }
+        self._schedule_readiness_probe()
+        with self._lock:
+            physical = (
+                json.loads(json.dumps(self._physical_cache))
+                if self._physical_cache is not None
+                else None
+            )
+            error = self._readiness_cache.get("error")
         return {
             "status": "ok" if physical is not None else "unavailable",
             "physical": physical,
+            **({"error": error} if physical is None and error else {}),
         }
+
+    def readiness(self) -> dict:
+        """Return cached deep readiness and keep exactly one probe in flight."""
+        self._schedule_readiness_probe()
+        with self._lock:
+            value = json.loads(json.dumps(self._readiness_cache))
+        checked_at = value.get("checked_at_ms")
+        if (
+            value.get("ready")
+            and isinstance(checked_at, int)
+            and int(time.time() * 1000) - checked_at > 15_000
+        ):
+            value["status"] = "probing"
+            value["ready"] = False
+            value["error"] = "JOY readiness evidence is stale"
+        return value
+
+    def _schedule_readiness_probe(self) -> None:
+        with self._lock:
+            checked_at = self._readiness_cache.get("checked_at_ms")
+            fresh = (
+                isinstance(checked_at, int)
+                and int(time.time() * 1000) - checked_at < 5_000
+            )
+            if fresh or (
+                self._readiness_probe is not None
+                and self._readiness_probe.is_alive()
+            ):
+                return
+            self._readiness_probe = threading.Thread(
+                target=self._probe_readiness,
+                name="safeexec-joy-readiness",
+                daemon=True,
+            )
+            self._readiness_probe.start()
+
+    def _probe_readiness(self) -> None:
+        """Probe JOY off the HTTP path so slow RPC cannot block Guard health."""
+        try:
+            with self._executor_lock:
+                physical = self.executor.physical_state()
+            is_fake = isinstance(self.executor, FakeExecutor)
+            if physical is None and not is_fake:
+                raise RuntimeError("executor returned no physical state")
+            if isinstance(physical, dict) and physical.get("ok") is False:
+                raise RuntimeError(str(physical.get("error") or "JOY RPC not ready"))
+            value = {
+                "schema_version": "safeexec.guard-readiness.v1",
+                "status": "ready",
+                "ready": True,
+                "guard_id": "joy-guard-01",
+                "expected_audience": self.verifier.expected_audience,
+                "executor": {
+                    "type": "fake" if is_fake else "joy",
+                    "ready": True,
+                    "arm_state": (
+                        physical.get("arm_state")
+                        if isinstance(physical, dict)
+                        else None
+                    ),
+                    "platform_state": (
+                        physical.get("platform_state")
+                        if isinstance(physical, dict)
+                        else None
+                    ),
+                },
+                "checked_at_ms": int(time.time() * 1000),
+                "auto_execute": False,
+            }
+            with self._lock:
+                self._readiness_cache = value
+                self._physical_cache = (
+                    json.loads(json.dumps(physical))
+                    if isinstance(physical, dict)
+                    else None
+                )
+        except Exception as exc:
+            value = {
+                "schema_version": "safeexec.guard-readiness.v1",
+                "status": "unavailable",
+                "ready": False,
+                "guard_id": "joy-guard-01",
+                "expected_audience": self.verifier.expected_audience,
+                "executor": {"type": "joy", "ready": False},
+                "error": str(exc),
+                "checked_at_ms": int(time.time() * 1000),
+                "auto_execute": False,
+            }
+            with self._lock:
+                self._readiness_cache = value
+                self._physical_cache = None
 
     @staticmethod
     def _get_time() -> float:
@@ -162,6 +272,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/healthz":
             self._json({"status": "ok"})
+            return
+
+        if parsed.path == "/readyz":
+            value = _guard.readiness()
+            self._json(
+                value,
+                HTTPStatus.OK if value["ready"] else HTTPStatus.SERVICE_UNAVAILABLE,
+            )
             return
 
         if parsed.path == "/v1/stats":
@@ -257,7 +375,7 @@ def main():
         expected_audience=args.audience,
     )
 
-    server = HTTPServer((args.host, args.port), Handler)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"SafeExec Guard listening on {args.host}:{args.port}")
     print(f"[Guard] Executor: {args.executor}")
     server.serve_forever()

@@ -97,6 +97,31 @@ class DashboardBackend:
 
     def snapshot(self) -> dict[str, Any]:
         line = json_request(f"{self.orchestrator_url}/v1/line/state", timeout=3)
+        try:
+            preflight = json_request(
+                f"{self.orchestrator_url}/v1/preflight",
+                timeout=4,
+            )
+        except UpstreamError as exc:
+            preflight = {
+                "schema_version": "safeexec.preflight.v1",
+                "status": "blocked",
+                "ready": False,
+                "components": {
+                    "orchestrator": {"status": "unavailable", "ready": False},
+                    "runtime": {"status": "unknown", "ready": False},
+                    "guard": {"status": "unknown", "ready": False},
+                    "joy": {"status": "unknown", "ready": False},
+                },
+                "blockers": [
+                    {
+                        "code": "PREFLIGHT_UNAVAILABLE",
+                        "message": str(exc),
+                    }
+                ],
+                "auto_execute": False,
+                "requires_operator_start": True,
+            }
         busy = any(
             task.get("status") in {"SUBMITTED", "EXECUTING"}
             for task in line.get("tasks", [])
@@ -123,11 +148,18 @@ class DashboardBackend:
                 if physical is None:
                     physical_status = "unavailable"
         return {
-            "schema_version": "safeexec.dashboard.v3",
+            "schema_version": "safeexec.dashboard.v4",
             "line": line,
+            "preflight": preflight,
             "physical": physical,
             "physical_status": physical_status,
         }
+
+    def preflight(self) -> dict[str, Any]:
+        return json_request(
+            f"{self.orchestrator_url}/v1/preflight",
+            timeout=4,
+        )
 
     @staticmethod
     def _merge_physical(
@@ -339,6 +371,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"status": "ok"})
             elif parsed.path == "/api/dashboard/v2":
                 self._json(self.backend.snapshot())
+            elif parsed.path == "/api/preflight":
+                self._json(self.backend.preflight())
             elif parsed.path == "/api/config":
                 self._json(self.backend.configuration())
             elif parsed.path == "/api/events":

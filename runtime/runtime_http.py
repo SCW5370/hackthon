@@ -25,6 +25,7 @@ from .fact_hub import FactHub
 from .event_ledger import EventLedger
 from .state_machine import StateMachine
 from .work_orders import WorkOrderRegistry
+from .executor_discovery import GuardEndpointDiscovery
 
 
 class SafeExecRuntime:
@@ -41,10 +42,16 @@ class SafeExecRuntime:
         guard_url: str = "http://localhost:8788/v1/execute",
         trusted_work_order_keys: dict[str, str] | None = None,
         require_work_order_for_actions: bool = False,
+        guard_candidates: list[str] | None = None,
     ):
         self.mission_spec = mission_spec
         self.guard_url = guard_url
         self.require_work_order_for_actions = require_work_order_for_actions
+        self.guard_discovery = (
+            GuardEndpointDiscovery(guard_candidates)
+            if guard_candidates
+            else None
+        )
 
         # 核心组件
         self.policy_engine = PolicyEngine(mission_spec)
@@ -188,7 +195,38 @@ class SafeExecRuntime:
                 },
             )
 
-        # 4. 允许 - 签发 Lease
+        # 4. Device readiness is a precondition, not an authorization source.
+        # Discovery never executes; unavailable devices fail closed before a
+        # Lease exists.
+        if self.guard_discovery is not None:
+            try:
+                self.guard_discovery.require_ready()
+            except ConnectionError as exc:
+                unavailable = Decision.deny(
+                    request_id=intent.request_id,
+                    reason_code="EXECUTOR_UNAVAILABLE",
+                )
+                self._emit_event(
+                    "executor.unavailable",
+                    "runtime",
+                    {
+                        "request_id": intent.request_id,
+                        "error": str(exc),
+                    },
+                    "critical",
+                )
+                response = {
+                    "status": "denied",
+                    "decision": unavailable.to_dict(),
+                }
+                self._record_latest_action(
+                    intent=intent.to_dict(),
+                    status="denied",
+                    decision=unavailable.to_dict(),
+                )
+                return response
+
+        # 5. 允许 - 签发 Lease
         self._emit_event(
             "policy.allowed",
             "runtime",
@@ -214,7 +252,7 @@ class SafeExecRuntime:
             },
         )
 
-        # 5. 调用 Guard 执行 (同步)
+        # 6. 调用 Guard 执行 (同步)
         guard_response = self._call_guard(intent, lease)
         if (
             matched_work_order_grant is not None
@@ -236,7 +274,7 @@ class SafeExecRuntime:
                 },
             )
 
-        # 6. 返回结果
+        # 7. 返回结果
         response = {
             "status": "ok",
             "decision": decision.to_dict(),
@@ -291,10 +329,18 @@ class SafeExecRuntime:
             "lease": lease.to_dict(),
         }
 
+        discovery = self.guard_discovery
         try:
+            execute_url = (
+                discovery.require_ready()
+                if discovery is not None
+                else self.guard_url
+            )
+            if discovery is not None:
+                discovery.set_executing(True)
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                self.guard_url,
+                execute_url,
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
@@ -317,6 +363,18 @@ class SafeExecRuntime:
                 "critical",
             )
             return {"status": "error", "message": f"Guard unavailable: {e}"}
+        except ConnectionError as e:
+            self._emit_event(
+                "guard.error",
+                "runtime",
+                {"lease_id": lease.lease_id, "error": str(e)},
+                "critical",
+            )
+            return {"status": "error", "message": f"Guard unavailable: {e}"}
+        finally:
+            if discovery is not None:
+                discovery.set_executing(False)
+                discovery.refresh()
 
     def add_fact(self, fact_dict: dict) -> dict:
         """添加或更新 Fact"""
@@ -375,6 +433,31 @@ class SafeExecRuntime:
             ),
         }
 
+    def get_readiness(self, *, refresh: bool = False) -> dict:
+        connectivity = None
+        if self.guard_discovery is not None:
+            connectivity = (
+                self.guard_discovery.refresh()
+                if refresh
+                else self.guard_discovery.snapshot()
+            )
+        ready = connectivity is None or connectivity.get("ready") is True
+        blockers = [] if ready else [
+            {
+                "code": "EXECUTOR_UNAVAILABLE",
+                "message": "未发现同时就绪的 Windows Guard 与 JOY 执行器",
+            }
+        ]
+        return {
+            "schema_version": "safeexec.runtime-readiness.v1",
+            "status": "ready" if ready else "unavailable",
+            "ready": ready,
+            "runtime": {"status": "ready"},
+            "executor_connectivity": connectivity,
+            "blockers": blockers,
+            "auto_execute": False,
+        }
+
     def get_events(self, after_seq: int = 0) -> dict:
         """获取事件"""
         return {
@@ -412,6 +495,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/healthz":
             self._json({"status": "ok"})
+            return
+
+        if parsed.path == "/readyz":
+            refresh = parse_qs(parsed.query).get("refresh", ["0"])[0] == "1"
+            value = _runtime.get_readiness(refresh=refresh)
+            self._json(
+                value,
+                HTTPStatus.OK if value["ready"] else HTTPStatus.SERVICE_UNAVAILABLE,
+            )
             return
 
         if parsed.path == "/v1/state":
@@ -500,6 +592,7 @@ def create_runtime(
     *,
     work_order_public_key_path: str | None = None,
     work_order_issuer_id: str = "biolab-control-plane",
+    guard_candidates: list[str] | None = None,
 ) -> SafeExecRuntime:
     """创建 Runtime 实例"""
     import yaml
@@ -523,6 +616,7 @@ def create_runtime(
         guard_url=guard_url,
         trusted_work_order_keys=trusted_work_order_keys,
         require_work_order_for_actions=trusted_work_order_keys is not None,
+        guard_candidates=guard_candidates,
     )
 
 
@@ -531,6 +625,12 @@ def main():
     parser.add_argument("--mission", required=True, help="Path to mission.yaml")
     parser.add_argument("--key", required=True, help="Path to private key (base64)")
     parser.add_argument("--guard-url", default="http://localhost:8788/v1/execute")
+    parser.add_argument(
+        "--guard-candidate",
+        action="append",
+        default=[],
+        help="Allowed Guard service base URL; repeat for failover candidates.",
+    )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--work-order-public-key")
@@ -548,6 +648,7 @@ def main():
         args.guard_url,
         work_order_public_key_path=args.work_order_public_key,
         work_order_issuer_id=args.work_order_issuer_id,
+        guard_candidates=args.guard_candidate or None,
     )
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)

@@ -38,6 +38,7 @@ echo $! >"${PID_FILE}"
 for _ in {1..30}; do
   if curl -fsS --max-time 1 http://127.0.0.1:8787/healthz >/dev/null; then
     echo "SafeExec edge Dashboard is ready at http://127.0.0.1:8787"
+    echo "Run scripts/preflight_demo.sh to verify the complete X5 → Guard → JOY path."
     exit 0
   fi
   sleep 0.2

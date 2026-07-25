@@ -9,7 +9,6 @@ WORK_ORDER_PUBLIC_KEY="${SAFEEXEC_WORK_ORDER_PUBLIC_KEY:-${SAFEEXEC_ROOT}/.run/w
 MISSION="${SAFEEXEC_MISSION:-${SAFEEXEC_ROOT}/config/mission_x5.yaml}"
 ENV_FILE="${SAFEEXEC_X5_ENV_FILE:-${SAFEEXEC_ROOT}/.run/x5-agent.env}"
 GUARD_URL="${SAFEEXEC_GUARD_URL:-http://30.201.220.34:8788}"
-LEGACY_URL="${LAB_LEGACY_URL:-http://30.201.220.34:8791}"
 RUNTIME_USER="${SAFEEXEC_RUNTIME_USER:-safeexec-runtime}"
 AGENT_USER="${SAFEEXEC_AGENT_USER:-safeexec-agent}"
 
@@ -43,6 +42,32 @@ fi
 
 mkdir -p "${RUN_DIR}"
 
+if systemctl cat safeexec-runtime.service >/dev/null 2>&1; then
+  systemctl restart safeexec-runtime.service
+  systemctl restart safeexec-orchestrator.service
+  for endpoint in \
+    "http://127.0.0.1:8790/healthz" \
+    "http://127.0.0.1:8789/healthz"; do
+    ready=0
+    for _ in {1..40}; do
+      if curl -fsS --max-time 1 "${endpoint}" >/dev/null 2>&1; then
+        ready=1
+        break
+      fi
+      sleep 0.25
+    done
+    if [[ "${ready}" != "1" ]]; then
+      echo "Service failed readiness at ${endpoint}" >&2
+      systemctl --no-pager --full status safeexec-runtime safeexec-orchestrator
+      exit 1
+    fi
+  done
+  echo "SafeExec X5 edge controller is managed by systemd"
+  curl -sS --max-time 3 http://127.0.0.1:8789/v1/preflight || true
+  echo
+  exit 0
+fi
+
 start_service() {
   local name="$1"
   shift
@@ -61,32 +86,11 @@ start_service() {
 start_service runtime \
   runuser -u "${RUNTIME_USER}" -- \
   env -u LLM_API_KEY -u LAB_LEGACY_TOKEN \
-  "${PYTHON_BIN}" -m runtime.runtime_http \
-  --host 0.0.0.0 \
-  --port 8790 \
-  --mission "${MISSION}" \
-  --key "${PRIVATE_KEY}" \
-  --work-order-public-key "${WORK_ORDER_PUBLIC_KEY}" \
-  --guard-url "${GUARD_URL}/v1/execute"
+  "${SAFEEXEC_ROOT}/scripts/run_x5_runtime.sh"
 
-orchestrator_args=(
-  "${PYTHON_BIN}" -m orchestrator.orchestrator_http
-  --host 0.0.0.0
-  --port 8789
-  --runtime-url http://127.0.0.1:8790
-  --legacy-url "${LEGACY_URL}"
-  --fact-mode external
-  --agent-provider "${SAFEEXEC_AGENT_PROVIDER:-replay}"
-  --require-trusted-work-order
-  --recovery-delay 1.5
-  --enable-testing
-)
-if [[ "${SAFEEXEC_ENABLE_UNSAFE_DEMO:-0}" == "1" ]]; then
-  orchestrator_args+=(--enable-unsafe-demo)
-fi
 start_service orchestrator \
   runuser --preserve-environment -u "${AGENT_USER}" -- \
-  "${orchestrator_args[@]}"
+  "${SAFEEXEC_ROOT}/scripts/run_x5_orchestrator.sh"
 
 for endpoint in \
   "http://127.0.0.1:8790/healthz" \

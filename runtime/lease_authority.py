@@ -9,6 +9,7 @@ import hashlib
 import os
 import time
 import secrets
+import threading
 from typing import Optional
 
 from .contracts import ActionIntent, ActionLease, Decision
@@ -169,7 +170,12 @@ class LeaseStore:
     def __init__(self, db_path: str = ":memory:"):
         import sqlite3
         self._sqlite3 = sqlite3
-        self.db = sqlite3.connect(db_path, isolation_level="IMMEDIATE")
+        self._lock = threading.Lock()
+        self.db = sqlite3.connect(
+            db_path,
+            isolation_level="IMMEDIATE",
+            check_same_thread=False,
+        )
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS consumed_leases (
@@ -185,17 +191,19 @@ class LeaseStore:
         尝试原子消费 lease_id
         Returns: True if newly consumed, False if already exists (replay)
         """
-        cursor = self.db.cursor()
-        try:
-            cursor.execute(
-                "INSERT INTO consumed_leases (lease_id, consumed_at) VALUES (?, ?)",
-                (lease_id, time.time())
-            )
-            self.db.commit()
-            return True
-        except self._sqlite3.IntegrityError:
-            # UNIQUE constraint violated = replay attack
-            return False
+        with self._lock:
+            cursor = self.db.cursor()
+            try:
+                cursor.execute(
+                    "INSERT INTO consumed_leases (lease_id, consumed_at) VALUES (?, ?)",
+                    (lease_id, time.time())
+                )
+                self.db.commit()
+                return True
+            except self._sqlite3.IntegrityError:
+                # UNIQUE constraint violated = replay attack
+                return False
 
     def close(self):
-        self.db.close()
+        with self._lock:
+            self.db.close()

@@ -72,9 +72,13 @@ class RuntimeClient(Protocol):
 
     def get_work_order(self, work_order_id: str) -> dict[str, Any]: ...
 
+    def get_readiness(self) -> dict[str, Any]: ...
+
 
 class UnsafeExecutorClient(Protocol):
     def submit_action(self, intent: dict[str, Any]) -> dict[str, Any]: ...
+
+    def get_readiness(self) -> dict[str, Any]: ...
 
 
 class HttpRuntimeClient:
@@ -115,6 +119,29 @@ class HttpRuntimeClient:
             raise ConnectionError(f"Runtime unavailable: {exc}") from exc
         if not isinstance(value, dict):
             raise RuntimeError("Runtime returned a non-object response")
+        return value
+
+    def get_readiness(self) -> dict[str, Any]:
+        request = Request(
+            f"{self.base_url}/readyz",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=min(self.timeout, 3.0)) as response:
+                value = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            try:
+                value = json.loads(detail)
+            except json.JSONDecodeError as parse_exc:
+                raise RuntimeError(
+                    f"Runtime readiness HTTP {exc.code}: {detail}"
+                ) from parse_exc
+        except (TimeoutError, URLError) as exc:
+            raise ConnectionError(f"Runtime unavailable: {exc}") from exc
+        if not isinstance(value, dict):
+            raise RuntimeError("Runtime returned non-object readiness")
         return value
 
     def _request(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +212,27 @@ class HttpUnsafeExecutorClient:
                     "receipt": receipt,
                 },
             },
+        }
+
+    def get_readiness(self) -> dict[str, Any]:
+        request = Request(
+            f"{self.base_url}/healthz",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=min(self.timeout, 3.0)) as response:
+                value = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, TimeoutError, URLError) as exc:
+            return {
+                "status": "unavailable",
+                "ready": False,
+                "error": str(exc),
+            }
+        return {
+            "status": "ready" if isinstance(value, dict) and value.get("ok") else "unavailable",
+            "ready": bool(isinstance(value, dict) and value.get("ok")),
+            "mode": "unsafe-baseline",
         }
 
 
@@ -356,6 +404,135 @@ class LineOrchestrator:
                 "worker_alive": bool(self._worker and self._worker.is_alive()),
             }
 
+    def preflight(self) -> dict[str, Any]:
+        """Return the complete edge-to-device readiness chain."""
+        with self._lock:
+            execution_mode = self.execution_mode
+            line_state = self._line_state
+            has_work_order = self._active_work_order_id is not None
+            requires_work_order = self.require_trusted_work_order
+            worker_alive = bool(self._worker and self._worker.is_alive())
+        blockers: list[dict[str, str]] = []
+        runtime: dict[str, Any]
+        try:
+            runtime = self.runtime.get_readiness()
+        except AttributeError:
+            runtime = {
+                "status": "ready",
+                "ready": True,
+                "test_double": True,
+            }
+        except (ConnectionError, RuntimeError) as exc:
+            runtime = {
+                "status": "unavailable",
+                "ready": False,
+                "error": str(exc),
+            }
+
+        execution_path_ready = runtime.get("ready") is True
+        if execution_mode == "unsafe-baseline":
+            if self.unsafe_executor is None:
+                unsafe = {"status": "disabled", "ready": False}
+            else:
+                try:
+                    unsafe = self.unsafe_executor.get_readiness()
+                except AttributeError:
+                    unsafe = {
+                        "status": "ready",
+                        "ready": True,
+                        "test_double": True,
+                    }
+            execution_path_ready = unsafe.get("ready") is True
+        else:
+            unsafe = None
+
+        if not execution_path_ready:
+            blockers.append(
+                {
+                    "code": "EXECUTION_PATH_UNAVAILABLE",
+                    "message": (
+                        "Windows Guard 与 JOY 尚未同时就绪"
+                        if execution_mode == "protected"
+                        else "无保护演示执行端尚未就绪"
+                    ),
+                }
+            )
+        if requires_work_order and not has_work_order:
+            blockers.append(
+                {
+                    "code": "WORK_ORDER_REQUIRED",
+                    "message": "尚未激活已验证的可信工单",
+                }
+            )
+        ready = not blockers
+        connectivity = runtime.get("executor_connectivity")
+        selected_guard = (
+            connectivity.get("selected_guard")
+            if isinstance(connectivity, Mapping)
+            else None
+        )
+        return {
+            "schema_version": "safeexec.preflight.v1",
+            "status": "ready" if ready else "blocked",
+            "ready": ready,
+            "execution_mode": execution_mode,
+            "line_state": line_state,
+            "components": {
+                "orchestrator": {
+                    "status": "ready",
+                    "ready": True,
+                    "worker_alive": worker_alive,
+                },
+                "runtime": {
+                    "status": runtime.get("status", "unknown"),
+                    "ready": runtime.get("ready") is True,
+                },
+                "guard": {
+                    "status": (
+                        connectivity.get("status", "unknown")
+                        if isinstance(connectivity, Mapping)
+                        else "not-monitored"
+                    ),
+                    "ready": bool(
+                        isinstance(connectivity, Mapping)
+                        and connectivity.get("ready")
+                    ),
+                    "endpoint": (
+                        connectivity.get("selected_endpoint")
+                        if isinstance(connectivity, Mapping)
+                        else None
+                    ),
+                },
+                "joy": {
+                    "status": (
+                        "ready"
+                        if isinstance(selected_guard, Mapping)
+                        and selected_guard.get("executor", {}).get("ready")
+                        else "unavailable"
+                    ),
+                    "ready": bool(
+                        isinstance(selected_guard, Mapping)
+                        and selected_guard.get("executor", {}).get("ready")
+                    ),
+                    "executor": (
+                        selected_guard.get("executor")
+                        if isinstance(selected_guard, Mapping)
+                        else None
+                    ),
+                },
+            },
+            "runtime_readiness": runtime,
+            "unsafe_readiness": unsafe,
+            "work_order": {
+                "required": requires_work_order,
+                "active": has_work_order,
+                "work_order_id": self._active_work_order_id,
+            },
+            "blockers": blockers,
+            "auto_execute": False,
+            "requires_operator_start": True,
+        }
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             current = self._find_task(self._current_task_id)
@@ -456,6 +633,10 @@ class LineOrchestrator:
                 raise ConflictError(
                     "no verified WorkOrder is active; create one in /config first"
                 )
+            preflight = self.preflight()
+            if not preflight["ready"]:
+                codes = ", ".join(item["code"] for item in preflight["blockers"])
+                raise ConflictError(f"preflight blocked: {codes}")
             self._line_state = "RUNNING"
             self._emit(
                 "line.started",

@@ -19,6 +19,18 @@ if (Test-Path -LiteralPath $pidFile) {
     }
 }
 
+$existingRuntime = Get-CimInstance Win32_Process |
+    Where-Object {
+        $_.Name -like "python*" -and
+        $_.CommandLine -like "*BioLab_Guardian.py*"
+    } |
+    Select-Object -First 1
+if ($existingRuntime) {
+    $existingRuntime.ProcessId | Set-Content -LiteralPath $pidFile
+    Write-Host "BioLab_Guardian is already running (PID $($existingRuntime.ProcessId))."
+    exit 0
+}
+
 $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
 if (Test-Path -LiteralPath $venvPython) {
     $python = $venvPython

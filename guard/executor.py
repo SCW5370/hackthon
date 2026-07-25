@@ -5,6 +5,7 @@ SafeExec V1 Executor Interface
 from __future__ import annotations
 
 import time
+import threading
 from abc import ABC, abstractmethod
 from typing import Any, TYPE_CHECKING
 
@@ -118,23 +119,25 @@ class JoyExecutor(BaseExecutor):
         timeout: float = 120.0,
         backend: Any | None = None,
     ):
-        if backend is None:
-            from joy.driver import JoyDriver
-            from joy.safeexec_adapter import JoyExecutor as JoyBackend
-
-            driver = JoyDriver(host, port).connect()
-            backend = JoyBackend(driver, timeout=timeout)
+        self._host = host
+        self._port = port
+        self._timeout = timeout
         self._backend = backend
         self._call_count = 0
+        self._connection_lock = threading.RLock()
 
     @property
     def call_count(self) -> int:
         return self._call_count
 
     def execute(self, intent: dict) -> dict:
-        self._call_count += 1
-        receipt = self._backend.execute(intent)
+        with self._connection_lock:
+            backend = self._ensure_backend()
+            self._call_count += 1
+            receipt = backend.execute(intent)
         if receipt.get("state") != "succeeded":
+            if receipt.get("error_code") == "JOY_UNAVAILABLE":
+                self._drop_backend()
             raise RuntimeError(
                 f"JOY execution failed: "
                 f"{receipt.get('error_code')}: {receipt.get('error')}"
@@ -148,12 +151,37 @@ class JoyExecutor(BaseExecutor):
         }
 
     def physical_state(self) -> dict[str, Any] | None:
-        driver = getattr(self._backend, "driver", None)
-        if driver is None:
-            return None
-        return driver.health()
+        with self._connection_lock:
+            backend = self._ensure_backend()
+            driver = getattr(backend, "driver", None)
+            if driver is None:
+                return None
+            try:
+                return driver.health()
+            except Exception:
+                self._drop_backend()
+                raise
+
+    def _ensure_backend(self) -> Any:
+        if self._backend is not None:
+            return self._backend
+        from joy.driver import JoyDriver
+        from joy.safeexec_adapter import JoyExecutor as JoyBackend
+
+        driver = JoyDriver(self._host, self._port).connect()
+        self._backend = JoyBackend(driver, timeout=self._timeout)
+        return self._backend
+
+    def _drop_backend(self) -> None:
+        backend = self._backend
+        self._backend = None
+        driver = getattr(backend, "driver", None)
+        if driver is not None:
+            try:
+                driver.disconnect()
+            except Exception:
+                pass
 
     def stop(self):
-        driver = getattr(self._backend, "driver", None)
-        if driver is not None:
-            driver.disconnect()
+        with self._connection_lock:
+            self._drop_backend()

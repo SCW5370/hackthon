@@ -41,6 +41,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/healthz":
                 self._json(self.app.health())
+            elif parsed.path == "/v1/preflight":
+                self._json(self.app.preflight())
             elif parsed.path == "/v1/line/state":
                 self._json(self.app.snapshot())
             elif parsed.path == "/v1/events":

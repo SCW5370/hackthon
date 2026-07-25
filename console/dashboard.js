@@ -23,6 +23,9 @@ const ui = Object.fromEntries([
   "metric-unsafe", "recent-events-list", "scroll-toggle", "audit-drawer",
   "audit-close", "audit-list", "scrim", "compiled-job", "runtime-path",
   "attack-form", "injection-target", "injection-content", "job-caption",
+  "preflight-status", "preflight-message", "orchestrator-dot",
+  "runtime-dot", "guard-dot", "joy-dot", "orchestrator-detail",
+  "runtime-detail", "guard-detail", "joy-detail",
 ].map(id => [id, document.getElementById(id)]));
 
 let snapshot = null;
@@ -62,19 +65,72 @@ async function loadSnapshot() {
 function render() {
   if (!snapshot) return;
   const line = snapshot.line;
+  const preflight = snapshot.preflight || {};
   const state = line.line_state || "STOPPED";
   ui["line-state"].textContent = STATE_LABELS[state] || state;
   ui["line-state-dot"].className = `state-dot ${state.toLowerCase()}`;
   ui["active-task"].textContent = line.current_task_id || "无活动任务";
+  const deviceReady = ["runtime", "guard", "joy"].every(
+    name => preflight.components?.[name]?.ready === true,
+  );
   for (const action of ["start", "pause", "resume", "reset"]) {
-    ui[`${action}-btn`].disabled = !line.controls?.[action];
+    const readinessAllows = action === "start"
+      ? preflight.ready
+      : action === "reset" ? deviceReady : true;
+    ui[`${action}-btn`].disabled =
+      !line.controls?.[action] || !readinessAllows;
   }
+  renderPreflight(preflight);
   renderJob(line);
   renderInjectionTargets(line);
   renderTasks(line);
   renderTrace(line);
   renderPhysical(snapshot.physical, snapshot.physical_status, line.counters);
   renderMetrics(line.counters);
+}
+
+function renderPreflight(preflight) {
+  const components = preflight.components || {};
+  const ready = preflight.ready === true;
+  ui["preflight-status"].textContent = ready ? "全链路就绪" : "启动已锁定";
+  ui["preflight-status"].className = `readiness-chip ${ready ? "ready" : "blocked"}`;
+  const firstBlocker = preflight.blockers?.[0];
+  ui["preflight-message"].textContent = ready
+    ? "X5 已发现 Windows Guard，JOY 执行器响应正常"
+    : firstBlocker?.message || "等待执行链路完成预检";
+
+  const labels = {
+    orchestrator: ["orchestrator-dot", "orchestrator-detail", "Orchestrator"],
+    runtime: ["runtime-dot", "runtime-detail", "策略 · Lease"],
+    guard: ["guard-dot", "guard-detail", "Guard"],
+    joy: ["joy-dot", "joy-detail", "JOY RPC"],
+  };
+  for (const [name, [dotId, detailId, fallback]] of Object.entries(labels)) {
+    const component = components[name] || {};
+    ui[dotId].className = `component-dot ${component.ready ? "ready" : "blocked"}`;
+    if (name === "guard") {
+      ui[detailId].textContent = component.ready
+        ? `已发现 · ${shortEndpoint(component.endpoint)}`
+        : "未发现可用执行端";
+    } else if (name === "joy") {
+      const state = component.executor?.arm_state;
+      ui[detailId].textContent = component.ready
+        ? `RPC 就绪${state ? ` · ${state}` : ""}`
+        : "RPC 未就绪";
+    } else {
+      ui[detailId].textContent = component.ready ? `${fallback} 就绪` : `${fallback} 不可用`;
+    }
+  }
+}
+
+function shortEndpoint(value) {
+  if (!value) return "已选择";
+  try {
+    const url = new URL(value);
+    return url.host;
+  } catch {
+    return String(value);
+  }
 }
 
 function renderJob(line) {

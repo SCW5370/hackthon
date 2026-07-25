@@ -42,6 +42,43 @@
 
   <div class="notice" id="notice" role="status" hidden></div>
 
+  <section class="topology-strip" aria-labelledby="topology-title">
+    <div class="topology-summary">
+      <div>
+        <h2 id="topology-title">执行链路</h2>
+        <p id="preflight-message">正在检查 Mac、X5 与 Windows 执行端</p>
+      </div>
+      <span class="readiness-chip" id="preflight-status">检查中</span>
+    </div>
+    <ol class="topology-path" aria-label="SafeExec 部署拓扑">
+      <li class="topology-node" data-component="management">
+        <span class="component-dot ready" aria-hidden="true"></span>
+        <div><strong>Mac 控制面</strong><small>工单 · 配置 · 审计</small></div>
+      </li>
+      <li class="topology-link" aria-hidden="true">→</li>
+      <li class="topology-node" data-component="orchestrator">
+        <span class="component-dot" id="orchestrator-dot" aria-hidden="true"></span>
+        <div><strong>RDK X5 Agent</strong><small id="orchestrator-detail">Orchestrator</small></div>
+      </li>
+      <li class="topology-link" aria-hidden="true">→</li>
+      <li class="topology-node" data-component="runtime">
+        <span class="component-dot" id="runtime-dot" aria-hidden="true"></span>
+        <div><strong>SafeExec Runtime</strong><small id="runtime-detail">策略 · Lease</small></div>
+      </li>
+      <li class="topology-link" aria-hidden="true">→</li>
+      <li class="topology-node" data-component="guard">
+        <span class="component-dot" id="guard-dot" aria-hidden="true"></span>
+        <div><strong>Windows Guard</strong><small id="guard-detail">正在发现</small></div>
+      </li>
+      <li class="topology-link" aria-hidden="true">→</li>
+      <li class="topology-node" data-component="joy">
+        <span class="component-dot" id="joy-dot" aria-hidden="true"></span>
+        <div><strong>JOY 机械臂</strong><small id="joy-detail">等待 RPC</small></div>
+      </li>
+    </ol>
+    <p class="topology-rule">自动发现只建立连接。动作仍需可信工单、策略匹配和一次性 Lease，并由操作员启动。</p>
+  </section>
+
   <section class="command-deck dashboard-command" aria-label="演示输入">
     <div class="configuration-summary">
       <div>

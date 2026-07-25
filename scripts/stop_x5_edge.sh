@@ -4,6 +4,12 @@ set -euo pipefail
 SAFEEXEC_ROOT="${SAFEEXEC_ROOT:-/opt/safeexec}"
 RUN_DIR="${SAFEEXEC_ROOT}/.run/x5"
 
+if systemctl cat safeexec-runtime.service >/dev/null 2>&1; then
+  systemctl stop safeexec-orchestrator.service safeexec-runtime.service
+  echo "stopped X5 systemd services"
+  exit 0
+fi
+
 for name in orchestrator runtime; do
   pid_file="${RUN_DIR}/${name}.pid"
   if [[ ! -f "${pid_file}" ]]; then
