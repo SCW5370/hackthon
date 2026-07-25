@@ -3,8 +3,12 @@ import json
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from urllib.error import URLError
 
+from guard.executor import FakeExecutor
+from guard.guard_http import SafeExecGuard
+from runtime.lease_authority import LeaseAuthority
 from runtime.executor_discovery import (
     GuardEndpointDiscovery,
     normalize_guard_base_url,
@@ -26,6 +30,18 @@ class Response:
 
 
 class ExecutorDiscoveryTests(unittest.TestCase):
+    def test_guard_readiness_exposes_fresh_server_clock_outside_cache(self):
+        _, public_key = LeaseAuthority.generate_keypair()
+        guard = SafeExecGuard(public_key, FakeExecutor())
+        guard._schedule_readiness_probe = lambda: None
+
+        with patch("guard.guard_http.time.time", side_effect=[10.0, 11.0]):
+            first = guard.readiness()
+            second = guard.readiness()
+
+        self.assertEqual(first["server_time_ms"], 10_000)
+        self.assertEqual(second["server_time_ms"], 11_000)
+
     def test_normalizes_execute_url_to_service_base(self):
         self.assertEqual(
             normalize_guard_base_url("http://windows:8788/v1/execute"),
@@ -89,7 +105,7 @@ class ExecutorDiscoveryTests(unittest.TestCase):
                 {
                     "status": "ready",
                     "ready": True,
-                    "checked_at_ms": 6_500,
+                    "server_time_ms": 6_500,
                     "expected_audience": "joy-guard-01",
                     "executor": {"type": "joy", "ready": True},
                 }
@@ -112,7 +128,7 @@ class ExecutorDiscoveryTests(unittest.TestCase):
                 {
                     "status": "ready",
                     "ready": True,
-                    "checked_at_ms": 9_250,
+                    "server_time_ms": 9_250,
                     "expected_audience": "joy-guard-01",
                     "executor": {"type": "joy", "ready": True},
                 }

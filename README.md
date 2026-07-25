@@ -192,7 +192,7 @@ X5 A/B 实机验收：
 
 - 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
 - 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
-- 当前测试集：99 项。
+- 当前测试集：100 项。
 
 X5 的 Dashboard、Orchestrator 与 Runtime 由 systemd 开机自启并设置为任意
 退出后自动拉起。`safeexec-healthcheck.timer` 每 10 秒检查本机健康端点，只有
@@ -203,7 +203,8 @@ Lease 签发后若 Guard 连接中断，Runtime 不会把动作误报为“未�
 `EXECUTION_OUTCOME_UNKNOWN`，保守消耗对应 WorkOrder 预算并把生产线锁定在
 `ERROR`。操作员必须依据实时物理状态核对结果，再通过签名复位恢复。
 
-Runtime 还会比较 X5 与 Windows Guard 的时钟，偏差超过 2 秒时在 Lease
+Guard 每次就绪响应都会返回不经缓存的 `server_time_ms`。Runtime 会据此比较
+X5 与 Windows Guard 的时钟，偏差超过 2 秒时在 Lease
 签发前将执行端标为不可用，避免短时 Lease 因跨设备时钟漂移在 Guard 侧过期。
 
 ## 三屏展览分工

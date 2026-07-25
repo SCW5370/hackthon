@@ -145,7 +145,7 @@ class GuardEndpointDiscovery:
                 raise ValueError(
                     str(value.get("error") or "JOY executor is not ready")
                 )
-            guard_checked_at = value.get("checked_at_ms")
+            guard_checked_at = value.get("server_time_ms")
             clock_skew_ms = None
             if isinstance(guard_checked_at, (int, float)):
                 clock_skew_ms = abs(self._now_ms() - int(guard_checked_at))

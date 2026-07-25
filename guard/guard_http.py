@@ -165,6 +165,10 @@ class SafeExecGuard:
         self._schedule_readiness_probe()
         with self._lock:
             value = json.loads(json.dumps(self._readiness_cache))
+        # Keep executor evidence cached, but expose the Guard host's current
+        # wall clock on every request. Runtime uses this fresh value to detect
+        # cross-device clock skew before issuing a short-lived Lease.
+        value["server_time_ms"] = int(time.time() * 1000)
         checked_at = value.get("checked_at_ms")
         if (
             value.get("ready")
