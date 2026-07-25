@@ -339,6 +339,12 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status: HTTPStatus, message: str):
         self._json({"error": message}, status)
 
+    def log_message(self, format: str, *args: object) -> None:
+        # Scheduled tasks run with pythonw.exe and have no stderr console.
+        # Audit events are recorded by SafeExecGuard, so access logging is
+        # intentionally silent here.
+        return
+
 
 def main():
     parser = argparse.ArgumentParser(description="SafeExec Guard")

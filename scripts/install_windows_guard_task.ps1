@@ -16,6 +16,8 @@ foreach ($Required in @($PythonExe, $Runner, $PublicKey)) {
         throw "Missing required file: $Required"
     }
 }
+$PythonwExe = Join-Path (Split-Path $PythonExe) "pythonw.exe"
+$TaskPython = if (Test-Path $PythonwExe) { $PythonwExe } else { $PythonExe }
 
 $Arguments = @(
     "`"$Runner`""
@@ -28,7 +30,7 @@ $Arguments = @(
 ) -join " "
 
 $Action = New-ScheduledTaskAction `
-    -Execute $PythonExe `
+    -Execute $TaskPython `
     -Argument $Arguments `
     -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME

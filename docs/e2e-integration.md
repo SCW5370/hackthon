@@ -60,7 +60,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_guard_watchdo
 `/readyz`，仅在 BioLab 进程存在且连续两次失败时重启 Guard。
 
 BioLab 数字孪生脚本也可独立托管；它会在 JOY 尚未就绪时等待或由任务计划
-程序重试：
+程序重试。Guard 与 BioLab 优先使用 JOY 附带的 `pythonw.exe`，后台运行时
+不会弹出 Python 控制台窗口：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_biolab_task.ps1

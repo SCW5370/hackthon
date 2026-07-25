@@ -12,7 +12,7 @@ if (-not (Test-Path $KeepAwake)) {
 
 $Action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$KeepAwake`"" `
+    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$KeepAwake`"" `
     -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $Principal = New-ScheduledTaskPrincipal `

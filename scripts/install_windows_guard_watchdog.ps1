@@ -12,7 +12,7 @@ if (-not (Test-Path $Watchdog)) {
 
 $Action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Watchdog`" -RepoRoot `"$RepoRoot`"" `
+    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Watchdog`" -RepoRoot `"$RepoRoot`"" `
     -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger `
     -Once `

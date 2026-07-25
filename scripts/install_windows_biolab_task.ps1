@@ -13,9 +13,11 @@ foreach ($Required in @($PythonExe, $LevelScript)) {
         throw "Missing required file: $Required"
     }
 }
+$PythonwExe = Join-Path (Split-Path $PythonExe) "pythonw.exe"
+$TaskPython = if (Test-Path $PythonwExe) { $PythonwExe } else { $PythonExe }
 
 $Action = New-ScheduledTaskAction `
-    -Execute $PythonExe `
+    -Execute $TaskPython `
     -Argument "`"$LevelScript`"" `
     -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
