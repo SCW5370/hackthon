@@ -140,16 +140,13 @@ class DashboardServerTests(unittest.TestCase):
         )
 
     def test_untrusted_content_is_rendered_with_text_content_only(self) -> None:
-        source = Path("console/dashboard.js").read_text(encoding="utf-8")
-        self.assertIn('ui[id].textContent', source)
-        self.assertNotIn("innerHTML", source)
-        self.assertIn("renderPreflight", source)
+        for file_name in ("experience.js", "monitor.js"):
+            source = Path(f"console/{file_name}").read_text(encoding="utf-8")
+            self.assertNotIn("innerHTML", source)
+            self.assertIn("textContent", source)
 
     def test_trusted_configuration_is_a_separate_page(self) -> None:
-        dashboard = Path("console/index.html").read_text(encoding="utf-8")
         config = Path("console/config.html").read_text(encoding="utf-8")
-        self.assertIn('href="/config"', dashboard)
-        self.assertNotIn('id="job-form"', dashboard)
         self.assertIn('id="work-order-form"', config)
         self.assertIn("签发可信工单", config)
 
@@ -161,13 +158,65 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('id="system-drawer"', experience)
         self.assertIn('id="evidence-drawer"', experience)
         self.assertEqual(experience.count('class="run-attack"'), 1)
-        self.assertIn('href="/experience"', Path("console/index.html").read_text())
         self.assertIn('"/experience": CONSOLE / "experience.html"', Path(
             "dev/dashboard_server.py"
         ).read_text())
+        self.assertIn('href="/monitor"', experience)
         self.assertNotIn("innerHTML", script)
         self.assertIn("textContent", script)
         self.assertNotIn("unsafe-mode-token", experience)
+
+    def test_monitor_is_read_only_and_uses_live_evidence(self) -> None:
+        monitor = Path("console/monitor.html").read_text(encoding="utf-8")
+        script = Path("console/monitor.js").read_text(encoding="utf-8")
+        routes = Path("dev/dashboard_server.py").read_text(encoding="utf-8")
+        self.assertIn("现场安全评分", monitor)
+        self.assertIn("动作意图如何抵达设备", monitor)
+        self.assertIn("实时审计记录", monitor)
+        self.assertNotIn("/api/control/", script)
+        self.assertNotIn("/api/work-orders", script)
+        self.assertIn("/api/monitor", script)
+        self.assertIn("/api/events/stream", script)
+        self.assertIn('"/": CONSOLE / "experience.html"', routes)
+        self.assertNotIn("console/index.html", routes)
+
+    def test_challenge_history_is_bounded_and_available_to_monitor(self) -> None:
+        with patch(
+            "dev.dashboard_server.json_request",
+            return_value={
+                "execution_mode": "protected",
+                "tasks": [
+                    {
+                        "task_id": "task-sample-C",
+                        "sample_id": "sample-C",
+                        "status": "QUEUED",
+                    }
+                ],
+            },
+        ):
+            result = self.backend.experience_challenge(
+                self._challenge("prompt-injection")
+            )
+        history = self.backend.experience_challenges()
+        self.assertEqual(
+            history["schema_version"],
+            "safeexec.experience-challenge-list.v1",
+        )
+        self.assertEqual(history["challenges"], [result])
+
+    def test_monitor_snapshot_is_read_only_composite(self) -> None:
+        with patch.object(
+            self.backend,
+            "snapshot",
+            return_value={"schema_version": "safeexec.dashboard.v4"},
+        ):
+            value = self.backend.monitor_snapshot()
+        self.assertEqual(value["schema_version"], "safeexec.monitor.v1")
+        self.assertEqual(
+            value["dashboard"]["schema_version"],
+            "safeexec.dashboard.v4",
+        )
+        self.assertEqual(value["challenges"], [])
 
     def _challenge(self, attack_type: str) -> dict:
         return {

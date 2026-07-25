@@ -95,7 +95,8 @@ cd /opt/safeexec
 默认地址：
 
 - X5 USB：`192.168.128.10`
-- Dashboard：`http://safeexec-x5.local:8787`
+- 嘉宾体验：`http://safeexec-x5.local:8787/experience`
+- 安全观测墙：`http://safeexec-x5.local:8787/monitor`
 - 可信配置：`http://safeexec-x5.local:8787/config`
 - Orchestrator：`http://192.168.128.10:8789`
 - Runtime：`http://192.168.128.10:8790`
@@ -109,14 +110,17 @@ SAFEEXEC_GUARD_CANDIDATES=http://WINDOWS_LAN_IP:8788,http://WINDOWS_TAILSCALE_IP
 候选按顺序选择；未通过 `/readyz`、audience 不匹配或 JOY 未响应的服务不会
 成为执行端。`LAB_LEGACY_URL` 仅配置显式不安全的对照桥。
 
-## 3. Mac：打开管理终端
+## 3. 三台电脑：分离体验、观测与物理执行
 
-Mac 不保存密钥、不运行 SafeExec 服务，只打开浏览器：
+嘉宾 Mac 和观测电脑都不保存密钥、不运行 SafeExec 服务，只打开不同页面：
 
 ```bash
-open http://safeexec-x5.local:8787
-open http://safeexec-x5.local:8787/config
+open http://safeexec-x5.local:8787/experience
+open http://safeexec-x5.local:8787/monitor
 ```
+
+Windows 只运行 JOY、Guard 与执行适配器。`/config` 是赛前可信控制面，
+需要调整授权范围时才打开，不属于嘉宾演示主流程。
 
 健康检查：
 
@@ -134,9 +138,9 @@ curl http://192.168.128.10:8790/healthz
 
 依次操作：
 
-1. 在 Dashboard 点击“复位”。该动作仍经过 Runtime、Lease 与 Guard。
+1. 在嘉宾体验页点击“复位演示场景”。该动作仍经过 Runtime、Lease 与 Guard。
 2. 打开 `/config`，明确选择样品、路径和有效期，点击“签名并激活工单”。
-3. 返回 Dashboard，在不可信输入区选择任意排队样品并注入标签。
+3. 返回嘉宾体验页，选择任意攻击路径。
 4. 点击“开始”，观察 Agent 意图、WorkOrder 匹配、Lease 和物理结果。
 
 预期过程：
@@ -147,6 +151,10 @@ curl http://192.168.128.10:8790/healthz
 4. Runtime 返回 `NO_MATCHING_GRANT` 或 `WORK_ORDER_GRANT_MISMATCH`，不签发 Lease，Guard 与 JOY 均不会收到恶意动作。
 5. Orchestrator 销毁污染会话，保持 `RECOVERING` 1.5 秒。
 6. Orchestrator 从可信工单创建干净会话，正确搬运 `sample-E` 并继续任务。
+
+观测电脑同时展示动作经过 Agent、Runtime、Lease、Guard、JOY 的因果路径；
+如果执行链失败关闭，页面必须显示真实错误原因和 `NO CHANGE`，不得将故障任务
+误画成正常执行。
 
 最终验收值：
 

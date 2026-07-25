@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ActionGate 安全观测墙</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/monitor.css">
+</head>
+<body>
+  <header class="wall-header">
+    <a class="wall-brand" href="/monitor" aria-label="ActionGate 安全观测墙">
+      <span class="brand-sigil" aria-hidden="true"><i></i></span>
+      <span>
+        <strong>ACTIONGATE</strong>
+        <small>Embodied Agent Execution Monitor</small>
+      </span>
+    </a>
+
+    <div class="wall-verdict" id="wall-verdict" aria-live="polite">
+      <i aria-hidden="true"></i>
+      <span>
+        <small>当前执行态势</small>
+        <strong id="wall-verdict-label">正在连接证据链</strong>
+      </span>
+    </div>
+
+    <div class="wall-meta">
+      <span><small>EDGE</small><strong>RDK X5</strong></span>
+      <span><small>设备</small><strong>JOY TWIN</strong></span>
+      <time id="wall-clock">--:--:--</time>
+      <button id="fullscreen-toggle" type="button" aria-label="切换全屏">全屏</button>
+    </div>
+  </header>
+
+  <main class="wall-grid">
+    <aside class="assurance-panel wall-panel" aria-labelledby="assurance-title">
+      <header class="panel-heading">
+        <div>
+          <span>Live assurance</span>
+          <h1 id="assurance-title">现场安全评分</h1>
+        </div>
+        <strong id="score-trend">LIVE</strong>
+      </header>
+
+      <div class="score-gauge">
+        <svg viewBox="0 0 180 180" role="img" aria-labelledby="score-title score-desc">
+          <title id="score-title">现场安全评分</title>
+          <desc id="score-desc">根据组件健康、保护模式、危险结果和恢复完整性计算</desc>
+          <circle class="score-track" cx="90" cy="90" r="72"></circle>
+          <circle class="score-value" id="score-ring" cx="90" cy="90" r="72"></circle>
+        </svg>
+        <div>
+          <strong id="assurance-score">—</strong>
+          <span>/ 100</span>
+          <small id="assurance-grade">等待证据</small>
+        </div>
+      </div>
+
+      <p class="score-disclaimer">
+        展示分数由当前链路证据计算，不代表通用安全认证。
+      </p>
+
+      <dl class="score-factors">
+        <div><dt>四层服务健康</dt><dd id="factor-health">0 / 40</dd></div>
+        <div><dt>危险动作归零</dt><dd id="factor-unsafe">0 / 30</dd></div>
+        <div><dt>可信执行边界</dt><dd id="factor-boundary">0 / 20</dd></div>
+        <div><dt>污染会话恢复</dt><dd id="factor-recovery">0 / 10</dd></div>
+      </dl>
+
+      <section class="component-stack" aria-labelledby="component-title">
+        <div class="section-title">
+          <h2 id="component-title">执行链健康</h2>
+          <span id="component-summary">0 / 4</span>
+        </div>
+        <ol>
+          <li data-component="orchestrator">
+            <i></i><span>Agent Orchestrator</span><strong>CHECKING</strong>
+          </li>
+          <li data-component="runtime">
+            <i></i><span>SafeExec Runtime</span><strong>CHECKING</strong>
+          </li>
+          <li data-component="guard">
+            <i></i><span>Device Guard</span><strong>CHECKING</strong>
+          </li>
+          <li data-component="joy">
+            <i></i><span>JOY Executor</span><strong>CHECKING</strong>
+          </li>
+        </ol>
+      </section>
+    </aside>
+
+    <section class="causal-panel wall-panel" aria-labelledby="causal-title">
+      <header class="panel-heading causal-heading">
+        <div>
+          <span>Execution right path</span>
+          <h1 id="causal-title">动作意图如何抵达设备</h1>
+        </div>
+        <div class="line-state">
+          <i id="line-state-dot"></i>
+          <span><small>自主产线</small><strong id="line-state-label">读取中</strong></span>
+        </div>
+      </header>
+
+      <div class="causal-stage" id="causal-stage">
+        <article class="flow-node" data-layer="agent">
+          <span>01</span>
+          <i aria-hidden="true">A</i>
+          <div><small>业务层</small><strong>Agent</strong><em id="agent-state">等待任务</em></div>
+        </article>
+        <b class="flow-link" data-link="agent-runtime"><i></i></b>
+        <article class="flow-node" data-layer="runtime">
+          <span>02</span>
+          <i aria-hidden="true">R</i>
+          <div><small>独立安全层</small><strong>Runtime</strong><em id="runtime-state">等待意图</em></div>
+        </article>
+        <b class="flow-link" data-link="runtime-lease"><i></i></b>
+        <article class="flow-node compact" data-layer="lease">
+          <span>03</span>
+          <i aria-hidden="true">L</i>
+          <div><small>一次性权限</small><strong>Lease</strong><em id="lease-state">未签发</em></div>
+        </article>
+        <b class="flow-link" data-link="lease-guard"><i></i></b>
+        <article class="flow-node" data-layer="guard">
+          <span>04</span>
+          <i aria-hidden="true">G</i>
+          <div><small>设备边界</small><strong>Guard</strong><em id="guard-state">等待凭证</em></div>
+        </article>
+        <b class="flow-link" data-link="guard-device"><i></i></b>
+        <article class="flow-node" data-layer="device">
+          <span>05</span>
+          <i aria-hidden="true">J</i>
+          <div><small>物理执行</small><strong>JOY</strong><em id="device-state">设备就绪</em></div>
+        </article>
+      </div>
+
+      <div class="live-decision" id="live-decision">
+        <div class="decision-mark" aria-hidden="true"><i></i><b>✓</b></div>
+        <div>
+          <span id="decision-kicker">等待安全事件</span>
+          <strong id="decision-title">可信链路正在监控每一个动作意图</strong>
+          <p id="decision-detail">攻击发生时，这里会显示阻断层、原因代码和物理结果。</p>
+        </div>
+        <dl>
+          <div><dt>判定代码</dt><dd id="decision-code">READY</dd></div>
+          <div><dt>物理结果</dt><dd id="physical-outcome">NO CHANGE</dd></div>
+        </dl>
+      </div>
+
+      <section class="batch-section" aria-labelledby="batch-title">
+        <div class="section-title">
+          <h2 id="batch-title">当前批次</h2>
+          <span id="batch-label">Cycle —</span>
+        </div>
+        <ol class="batch-track" id="batch-track"></ol>
+        <div class="batch-meta">
+          <span>等候区 <strong id="storage-count">0</strong></span>
+          <i><b id="batch-progress"></b></i>
+          <span>分析区 <strong id="analyzer-count">0</strong></span>
+        </div>
+      </section>
+    </section>
+
+    <aside class="threat-panel wall-panel" aria-labelledby="threat-title">
+      <header class="panel-heading">
+        <div>
+          <span>Attack coverage</span>
+          <h1 id="threat-title">攻击验证矩阵</h1>
+        </div>
+        <strong id="blocked-total">0 BLOCKED</strong>
+      </header>
+
+      <ol class="attack-matrix" id="attack-matrix">
+        <li data-attack="prompt-injection">
+          <span>提示词注入</span><i></i><strong>WAITING</strong><small>Runtime</small>
+        </li>
+        <li data-attack="model-hallucination">
+          <span>模型幻觉</span><i></i><strong>WAITING</strong><small>Runtime</small>
+        </li>
+        <li data-attack="intent-tampering">
+          <span>指令篡改</span><i></i><strong>WAITING</strong><small>Guard</small>
+        </li>
+        <li data-attack="lease-replay">
+          <span>Lease 重放</span><i></i><strong>WAITING</strong><small>Guard</small>
+        </li>
+      </ol>
+
+      <section class="outcome-section" aria-labelledby="outcome-title">
+        <div class="section-title">
+          <h2 id="outcome-title">执行结果分布</h2>
+          <span id="outcome-total">0 decisions</span>
+        </div>
+        <div class="outcome-bars">
+          <div>
+            <span>可信执行</span><i><b id="allowed-bar"></b></i><strong id="allowed-count">0</strong>
+          </div>
+          <div>
+            <span>安全阻断</span><i><b id="blocked-bar"></b></i><strong id="blocked-count">0</strong>
+          </div>
+          <div class="unsafe">
+            <span>危险到达</span><i><b id="unsafe-bar"></b></i><strong id="unsafe-count">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="event-rate" aria-labelledby="event-rate-title">
+        <div class="section-title">
+          <h2 id="event-rate-title">事件速率</h2>
+          <span>最近 60 秒</span>
+        </div>
+        <svg id="event-sparkline" viewBox="0 0 320 72" preserveAspectRatio="none" aria-label="最近六十秒事件速率折线图">
+          <path class="spark-area" id="spark-area"></path>
+          <polyline id="spark-line"></polyline>
+        </svg>
+        <div class="rate-meta">
+          <span><strong id="events-per-minute">0</strong> events/min</span>
+          <span>SEQ <strong id="last-seq">0</strong></span>
+        </div>
+      </section>
+    </aside>
+
+    <section class="audit-panel wall-panel" aria-labelledby="audit-title">
+      <header class="audit-heading">
+        <div>
+          <span>Append-only evidence</span>
+          <h1 id="audit-title">实时审计记录</h1>
+        </div>
+        <div class="audit-summary">
+          <span>已完成 <strong id="completed-total">0</strong></span>
+          <span>已恢复 <strong id="recovered-total">0</strong></span>
+          <span>危险动作 <strong id="unsafe-total">0</strong></span>
+        </div>
+      </header>
+      <div class="audit-table" role="table" aria-label="最近安全审计事件">
+        <div class="audit-row audit-columns" role="row">
+          <span role="columnheader">SEQ</span>
+          <span role="columnheader">时间</span>
+          <span role="columnheader">来源</span>
+          <span role="columnheader">事件</span>
+          <span role="columnheader">证据 / 原因</span>
+        </div>
+        <div id="audit-rows"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="monitor-notice" id="monitor-notice" role="status" hidden></div>
+  <script src="/monitor.js"></script>
+</body>
+</html>

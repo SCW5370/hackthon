@@ -450,12 +450,23 @@ class SafeExecRuntime:
                 else self.guard_discovery.snapshot()
             )
         ready = connectivity is None or connectivity.get("ready") is True
-        blockers = [] if ready else [
-            {
-                "code": "EXECUTOR_UNAVAILABLE",
-                "message": "未发现同时就绪的 Windows Guard 与 JOY 执行器",
-            }
-        ]
+        blockers = []
+        if not ready:
+            candidate_errors = [
+                str(candidate.get("error"))
+                for candidate in (connectivity or {}).get("candidates", [])
+                if candidate.get("error")
+            ]
+            blockers.append(
+                {
+                    "code": "EXECUTOR_UNAVAILABLE",
+                    "message": (
+                        candidate_errors[0]
+                        if candidate_errors
+                        else "未发现同时就绪的 Windows Guard 与 JOY 执行器"
+                    ),
+                }
+            )
         return {
             "schema_version": "safeexec.runtime-readiness.v1",
             "status": "ready" if ready else "unavailable",

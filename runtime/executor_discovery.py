@@ -31,6 +31,8 @@ def normalize_guard_base_url(value: str) -> str:
 class GuardEndpointDiscovery:
     """Poll configured Guard endpoints and retain the first ready candidate."""
 
+    MAX_CLOCK_SKEW_MS = 2000
+
     def __init__(
         self,
         candidates: Iterable[str],
@@ -65,6 +67,7 @@ class GuardEndpointDiscovery:
                 "last_checked_ms": None,
                 "last_ready_ms": None,
                 "latency_ms": None,
+                "clock_skew_ms": None,
                 "error": None,
                 "guard": None,
             }
@@ -142,12 +145,22 @@ class GuardEndpointDiscovery:
                 raise ValueError(
                     str(value.get("error") or "JOY executor is not ready")
                 )
+            guard_checked_at = value.get("checked_at_ms")
+            clock_skew_ms = None
+            if isinstance(guard_checked_at, (int, float)):
+                clock_skew_ms = abs(self._now_ms() - int(guard_checked_at))
+                if clock_skew_ms > self.MAX_CLOCK_SKEW_MS:
+                    raise ValueError(
+                        "device clock skew "
+                        f"{clock_skew_ms}ms exceeds {self.MAX_CLOCK_SKEW_MS}ms"
+                    )
             return {
                 "endpoint": endpoint,
                 "status": "ready",
                 "last_checked_ms": checked_at,
                 "last_ready_ms": checked_at,
                 "latency_ms": round((time.monotonic() - started) * 1000),
+                "clock_skew_ms": clock_skew_ms,
                 "error": None,
                 "guard": value,
             }
@@ -158,6 +171,9 @@ class GuardEndpointDiscovery:
                 "last_checked_ms": checked_at,
                 "last_ready_ms": previous.get("last_ready_ms"),
                 "latency_ms": round((time.monotonic() - started) * 1000),
+                "clock_skew_ms": (
+                    clock_skew_ms if "clock_skew_ms" in locals() else None
+                ),
                 "error": str(exc),
                 "guard": None,
             }

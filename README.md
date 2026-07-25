@@ -6,10 +6,11 @@
 ## 架构
 
 ```
-Mac browser (management terminal)
-          │ http://X5:8787
+Mac browser (guest experience)        Teammate browser (security wall)
+          │ http://X5:8787/experience       │ http://X5:8787/monitor
+          └───────────────────┬─────────────┘
           ↓
-RDK X5 edge controller          Config UI / Dashboard :8787
+RDK X5 edge controller          Experience / Monitor / Config :8787
                                 Orchestrator :8789
 safeexec-agent (LLM / planning) ─ ActionIntent v2 → Runtime :8790
                                                       │ signed Lease
@@ -39,7 +40,7 @@ X5 只从显式允许列表主动发现 Guard 服务，Guard 再在 Windows 本�
 | **Guard** | 验签 + SQLite 防重放 + 执行拦截 |
 | **Endpoint Discovery** | X5 主动探测允许列表、校验 Guard audience 与 JOY 深度就绪 |
 | **Orchestrator** | 消费已验证工单、驱动 Agent 会话、攻击注入与单次恢复 |
-| **Dashboard** | 运行监控与增量审计，不签发可信授权 |
+| **Security Monitor** | 只读安全评分、因果阻断链、攻击矩阵与增量审计 |
 | **Experience UI** | 面向评委与参观者的交互演示，以因果路径呈现阻断、恢复与物理结果 |
 | **Config UI** | 结构化配置并签发可信 WorkOrder |
 
@@ -65,10 +66,10 @@ SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
 
 # X5 边缘控制器模式见 docs/e2e-integration.md
 
-# X5 模式下，Mac 只用浏览器打开控制台
-open http://safeexec-x5.local:8787
-open http://safeexec-x5.local:8787/config
+# X5 模式下，三台电脑只通过网络分工，不复制业务服务
 open http://safeexec-x5.local:8787/experience
+open http://safeexec-x5.local:8787/monitor
+open http://safeexec-x5.local:8787/config
 
 # 测试
 .venv/bin/python -m unittest discover -s tests -v
@@ -160,9 +161,10 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 - `GET /v1/events?after=<seq>`
 - `GET /v1/events/stream?after=<seq>`
 
-### Dashboard
+### Exhibition Web
 
 - `GET /api/dashboard/v2`（响应 schema 为 `safeexec.dashboard.v4`）
+- `GET /api/monitor`（只读观测墙聚合快照）
 - `GET /api/preflight`
 - `GET /api/config`
 - `POST /api/work-orders`
@@ -170,6 +172,7 @@ V4 Agent 生产线、Windows Guard 与 JOY 的部署和实机演示步骤见
 - `POST /api/control/continuous`
 - `POST /api/testing/injections`
 - `POST /api/experience/challenges` - 运行受限的游客攻击挑战
+- `GET /api/experience/challenges` - 查询本次进程内的挑战历史
 - `GET /api/experience/challenges/latest`
 - `GET /api/events/stream?after=<seq>`
 
@@ -189,7 +192,7 @@ X5 A/B 实机验收：
 
 - 保护模式：完成 1、阻断 1、恢复 1、危险动作 0。
 - 无保护模式：同一攻击到达 `waste-bin`，危险动作 1。
-- 当前测试集：94 项。
+- 当前测试集：99 项。
 
 X5 的 Dashboard、Orchestrator 与 Runtime 由 systemd 开机自启并设置为任意
 退出后自动拉起。`safeexec-healthcheck.timer` 每 10 秒检查本机健康端点，只有
@@ -199,6 +202,19 @@ X5 的 Dashboard、Orchestrator 与 Runtime 由 systemd 开机自启并设置为
 Lease 签发后若 Guard 连接中断，Runtime 不会把动作误报为“未执行”，而是标记
 `EXECUTION_OUTCOME_UNKNOWN`，保守消耗对应 WorkOrder 预算并把生产线锁定在
 `ERROR`。操作员必须依据实时物理状态核对结果，再通过签名复位恢复。
+
+Runtime 还会比较 X5 与 Windows Guard 的时钟，偏差超过 2 秒时在 Lease
+签发前将执行端标为不可用，避免短时 Lease 因跨设备时钟漂移在 Guard 侧过期。
+
+## 三屏展览分工
+
+- **Windows**：只运行 JOY 仿真、Guard 与本机执行适配，不承载策略和 Web 页面。
+- **嘉宾 Mac**：打开 `/experience`，选择攻击并观察“输入—判定—物理结果”。
+- **观测电脑**：全屏打开 `/monitor`，只读显示安全评分、阻断层、攻击覆盖与审计证据。
+
+旧工业控制台已移除；根路径直接进入嘉宾体验页。`/config` 仅供赛前签发可信
+WorkOrder，演示过程中不需要打开。一次性 reset、smoke 和 probe 脚本仅作为
+离线诊断工具保留，不会产生常驻服务或额外窗口。
 
 ## 开发
 

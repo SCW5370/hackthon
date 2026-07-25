@@ -31,17 +31,19 @@ from runtime.work_orders import WorkOrderIssuer
 ROOT = Path(__file__).resolve().parents[1]
 CONSOLE = ROOT / "console"
 STATIC_FILES = {
-    "/": CONSOLE / "index.html",
-    "/index.html": CONSOLE / "index.html",
+    "/": CONSOLE / "experience.html",
     "/experience": CONSOLE / "experience.html",
     "/experience.html": CONSOLE / "experience.html",
+    "/monitor": CONSOLE / "monitor.html",
+    "/monitor.html": CONSOLE / "monitor.html",
     "/config": CONSOLE / "config.html",
     "/config.html": CONSOLE / "config.html",
-    "/styles.css": CONSOLE / "styles.css",
-    "/dashboard.js": CONSOLE / "dashboard.js",
+    "/config.css": CONSOLE / "config.css",
     "/config.js": CONSOLE / "config.js",
     "/experience.css": CONSOLE / "experience.css",
     "/experience.js": CONSOLE / "experience.js",
+    "/monitor.css": CONSOLE / "monitor.css",
+    "/monitor.js": CONSOLE / "monitor.js",
     "/joy-lab-reference.jpg": CONSOLE / "joy-lab-reference.jpg",
 }
 DIRECT_OPENER = build_opener(ProxyHandler({}))
@@ -116,6 +118,7 @@ class DashboardBackend:
         self._last_physical: dict[str, Any] | None = None
         self._experience_lock = threading.RLock()
         self._latest_experience_challenge: dict[str, Any] | None = None
+        self._experience_challenges: list[dict[str, Any]] = []
 
     def snapshot(self) -> dict[str, Any]:
         line = json_request(f"{self.orchestrator_url}/v1/line/state", timeout=3)
@@ -330,6 +333,11 @@ class DashboardBackend:
 
         with self._experience_lock:
             self._latest_experience_challenge = json.loads(json.dumps(result))
+            self._experience_challenges.append(
+                json.loads(json.dumps(result))
+            )
+            if len(self._experience_challenges) > 64:
+                self._experience_challenges = self._experience_challenges[-64:]
         return result
 
     def latest_experience_challenge(self) -> dict[str, Any]:
@@ -341,6 +349,28 @@ class DashboardBackend:
                     "status": "idle",
                 }
             return json.loads(json.dumps(value))
+
+    def experience_challenges(self) -> dict[str, Any]:
+        """Return read-only challenge evidence for the exhibition monitor."""
+
+        with self._experience_lock:
+            return {
+                "schema_version": "safeexec.experience-challenge-list.v1",
+                "challenges": json.loads(
+                    json.dumps(self._experience_challenges)
+                ),
+            }
+
+    def monitor_snapshot(self) -> dict[str, Any]:
+        """Build the read-only security-observability surface."""
+
+        history = self.experience_challenges()
+        return {
+            "schema_version": "safeexec.monitor.v1",
+            "generated_at_ms": int(time.time() * 1000),
+            "dashboard": self.snapshot(),
+            "challenges": history["challenges"],
+        }
 
     def _run_hallucination_challenge(
         self,
@@ -756,8 +786,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"status": "ok"})
             elif parsed.path == "/api/dashboard/v2":
                 self._json(self.backend.snapshot())
+            elif parsed.path == "/api/monitor":
+                self._json(self.backend.monitor_snapshot())
             elif parsed.path == "/api/preflight":
                 self._json(self.backend.preflight())
+            elif parsed.path == "/api/experience/challenges":
+                self._json(self.backend.experience_challenges())
             elif parsed.path == "/api/experience/challenges/latest":
                 self._json(self.backend.latest_experience_challenge())
             elif parsed.path == "/api/config":

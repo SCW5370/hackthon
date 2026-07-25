@@ -81,6 +81,50 @@ class ExecutorDiscoveryTests(unittest.TestCase):
         with self.assertRaises(ConnectionError):
             discovery.require_ready()
 
+    def test_rejects_ready_guard_when_device_clock_skew_exceeds_lease_budget(self):
+        discovery = GuardEndpointDiscovery(
+            ["http://skewed:8788"],
+            now_ms=lambda: 10_000,
+            opener=lambda *_args, **_kwargs: Response(
+                {
+                    "status": "ready",
+                    "ready": True,
+                    "checked_at_ms": 6_500,
+                    "expected_audience": "joy-guard-01",
+                    "executor": {"type": "joy", "ready": True},
+                }
+            ),
+            autostart=False,
+        )
+
+        value = discovery.refresh()
+
+        self.assertFalse(value["ready"])
+        candidate = value["candidates"][0]
+        self.assertEqual(candidate["clock_skew_ms"], 3500)
+        self.assertIn("clock skew", candidate["error"])
+
+    def test_reports_acceptable_clock_skew_for_ready_guard(self):
+        discovery = GuardEndpointDiscovery(
+            ["http://synced:8788"],
+            now_ms=lambda: 10_000,
+            opener=lambda *_args, **_kwargs: Response(
+                {
+                    "status": "ready",
+                    "ready": True,
+                    "checked_at_ms": 9_250,
+                    "expected_audience": "joy-guard-01",
+                    "executor": {"type": "joy", "ready": True},
+                }
+            ),
+            autostart=False,
+        )
+
+        value = discovery.refresh()
+
+        self.assertTrue(value["ready"])
+        self.assertEqual(value["candidates"][0]["clock_skew_ms"], 750)
+
     def test_require_ready_waits_for_inflight_refresh_then_rechecks(self):
         discovery = GuardEndpointDiscovery(
             ["http://lan:8788"],

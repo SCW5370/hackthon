@@ -228,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path in {"/", "/index.html"}:
-            self._file(CONSOLE / "index.html")
+            self._file(CONSOLE / "experience.html")
             return
         requested = (CONSOLE / parsed.path.lstrip("/")).resolve()
         if CONSOLE in requested.parents and requested.is_file():
