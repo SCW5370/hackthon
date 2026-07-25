@@ -326,16 +326,18 @@ class Handler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "Not found")
 
     def _json(self, data: dict, status: int = HTTPStatus.OK):
+        payload = json.dumps(data).encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode("utf-8"))
+        self.wfile.write(payload)
+        self.wfile.flush()
+        self.close_connection = True
 
     def _error(self, status: HTTPStatus, message: str):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"error": message}).encode("utf-8"))
+        self._json({"error": message}, status)
 
 
 def main():

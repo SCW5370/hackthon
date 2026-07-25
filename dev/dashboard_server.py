@@ -17,7 +17,7 @@ import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 from biolab.catalog import LOCATION_NAMES, SAMPLE_IDS
 from runtime.work_orders import WorkOrderIssuer
@@ -33,6 +33,7 @@ STATIC_FILES = {
     "/dashboard.js": CONSOLE / "dashboard.js",
     "/config.js": CONSOLE / "config.js",
 }
+DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
 class UpstreamError(RuntimeError):
@@ -60,7 +61,9 @@ def json_request(
         method=method,
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        # Device-plane endpoints are explicit operator configuration, not
+        # Internet destinations. Never route them through a desktop proxy.
+        with DIRECT_OPENER.open(request, timeout=timeout) as response:
             value = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -428,7 +431,7 @@ class Handler(BaseHTTPRequestHandler):
             headers={"Accept": "text/event-stream"},
         )
         try:
-            upstream = urlopen(request, timeout=30)
+            upstream = DIRECT_OPENER.open(request, timeout=30)
         except (HTTPError, URLError) as exc:
             raise UpstreamError(HTTPStatus.BAD_GATEWAY, str(exc)) from exc
         self.send_response(HTTPStatus.OK)
