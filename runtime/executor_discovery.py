@@ -141,7 +141,10 @@ class GuardEndpointDiscovery:
                     f"unexpected Guard audience {audience!r}; "
                     f"expected {self.expected_audience!r}"
                 )
-            if value.get("ready") is not True or value.get("status") != "ready":
+            if (
+                value.get("ready") is not True
+                or value.get("status") not in {"ready", "executing"}
+            ):
                 raise ValueError(
                     str(value.get("error") or "JOY executor is not ready")
                 )

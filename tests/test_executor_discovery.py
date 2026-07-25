@@ -101,6 +101,29 @@ class ExecutorDiscoveryTests(unittest.TestCase):
         self.assertFalse(value["auto_execute"])
         self.assertTrue(value["requires_operator_start"])
 
+    def test_keeps_executing_guard_selected_during_long_physical_action(self):
+        discovery = GuardEndpointDiscovery(
+            ["http://busy:8788"],
+            now_ms=lambda: 10_000,
+            opener=lambda *_args, **_kwargs: Response(
+                {
+                    "status": "executing",
+                    "ready": True,
+                    "executing": True,
+                    "server_time_ms": 9_800,
+                    "expected_audience": "joy-guard-01",
+                    "executor": {"type": "joy", "ready": True},
+                }
+            ),
+            autostart=False,
+        )
+
+        value = discovery.refresh()
+
+        self.assertTrue(value["ready"])
+        self.assertEqual(value["selected_endpoint"], "http://busy:8788")
+        self.assertEqual(value["candidates"][0]["clock_skew_ms"], 200)
+
     def test_rejects_wrong_guard_audience(self):
         discovery = GuardEndpointDiscovery(
             ["http://wrong:8788"],
