@@ -6,11 +6,11 @@
 ## 架构
 
 ```
-Mac trusted control plane
-Config UI :8787/config ── signed WorkOrder ──────────────┐
-Dashboard :8787 ── control / audit ────────────────┐     │
-                                                   ↓     ↓
-RDK X5 edge controller                         Orchestrator :8789
+Mac browser (management terminal)
+          │ http://X5:8787
+          ↓
+RDK X5 edge controller          Config UI / Dashboard :8787
+                                Orchestrator :8789
 safeexec-agent (LLM / planning) ─ ActionIntent v2 → Runtime :8790
                                                       │ signed Lease
                                                       ↓
@@ -20,8 +20,10 @@ Windows device boundary                         Guard :8788 → JOY :18189
 ```
 
 Legacy Bridge 仅用于显式启用的无保护 A/B 演示。默认执行路径始终经过 Runtime、一次性 Lease 与 Guard。
-Mac 不运行 Agent 或 Runtime；Windows 不运行 Policy 或业务 Agent。X5 上的
+Mac 不运行服务；Windows 不运行 Policy 或业务 Agent。X5 上的
 Agent 与 Runtime 使用不同 Linux 服务账号，Agent 无权读取 Lease 私钥。
+演示版控制台使用第三个隔离账号 `safeexec-console`，其 WorkOrder 签名私钥
+不能被 Agent 或 Runtime 读取；生产部署应改接外部身份系统或 KMS。
 X5 只从显式允许列表主动发现 Guard 服务，Guard 再在 Windows 本机连接 JOY。
 发现设备只更新就绪状态，不会自动授权或执行动作。
 
@@ -62,9 +64,9 @@ SAFEEXEC_GUARD_URL=http://WINDOWS_IP:8788 ./scripts/start_stack.sh
 
 # X5 边缘控制器模式见 docs/e2e-integration.md
 
-# 打开控制台
-open http://127.0.0.1:8787
-open http://127.0.0.1:8787/config
+# X5 模式下，Mac 只用浏览器打开控制台
+open http://192.168.128.10:8787
+open http://192.168.128.10:8787/config
 
 # 测试
 .venv/bin/python -m unittest discover -s tests -v
@@ -185,7 +187,7 @@ X5 A/B 实机验收：
 ```
 Lease private key:       只保存在 Runtime
 Lease public key:        部署到 Windows Guard
-WorkOrder private key:   只保存在可信控制面
+WorkOrder private key:   只允许可信控制面账号读取（生产环境使用外部 KMS）
 WorkOrder public key:    只部署到 Runtime
 ```
 

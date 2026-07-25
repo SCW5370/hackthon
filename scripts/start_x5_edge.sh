@@ -45,7 +45,9 @@ mkdir -p "${RUN_DIR}"
 if systemctl cat safeexec-runtime.service >/dev/null 2>&1; then
   systemctl restart safeexec-runtime.service
   systemctl restart safeexec-orchestrator.service
+  systemctl restart safeexec-dashboard.service
   for endpoint in \
+    "http://127.0.0.1:8787/healthz" \
     "http://127.0.0.1:8790/healthz" \
     "http://127.0.0.1:8789/healthz"; do
     ready=0
@@ -63,6 +65,7 @@ if systemctl cat safeexec-runtime.service >/dev/null 2>&1; then
     fi
   done
   echo "SafeExec X5 edge controller is managed by systemd"
+  echo "Dashboard: http://192.168.128.10:8787"
   curl -sS --max-time 3 http://127.0.0.1:8789/v1/preflight || true
   echo
   exit 0
@@ -105,6 +108,7 @@ for endpoint in \
 done
 
 echo "SafeExec X5 edge controller is ready"
+echo "Dashboard:    http://192.168.128.10:8787"
 echo "Runtime:      http://192.168.128.10:8790"
 echo "Orchestrator: http://192.168.128.10:8789"
 echo "Guard:        ${GUARD_URL}"

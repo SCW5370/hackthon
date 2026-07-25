@@ -43,6 +43,36 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(value["physical_status"], "live")
         self.assertTrue(value["preflight"]["ready"])
 
+    def test_snapshot_reads_physical_state_from_discovered_guard(self) -> None:
+        line = {"line_state": "STOPPED", "tasks": []}
+        preflight = {
+            "status": "ready",
+            "ready": True,
+            "components": {
+                "guard": {
+                    "ready": True,
+                    "endpoint": "http://discovered-guard",
+                }
+            },
+        }
+
+        def response(url, **_kwargs):
+            if url == "http://orchestrator/v1/line/state":
+                return line
+            if url == "http://orchestrator/v1/preflight":
+                return preflight
+            if url == "http://discovered-guard/v1/physical":
+                return {
+                    "status": "ok",
+                    "physical": {"arm_state": "IDLE"},
+                }
+            raise AssertionError(url)
+
+        with patch("dev.dashboard_server.json_request", side_effect=response):
+            value = self.backend.snapshot()
+        self.assertEqual(value["physical_status"], "live")
+        self.assertEqual(value["physical"]["arm_state"], "IDLE")
+
     def test_busy_guard_uses_last_physical_evidence_without_polling(self) -> None:
         self.backend._last_physical = {"arm_state": "MOVING"}
         line = {

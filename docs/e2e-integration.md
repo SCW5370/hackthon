@@ -1,25 +1,25 @@
 # SafeExec V4 签名工单生产线联调
 
-本方案将 Mac 上的可信配置页和 Dashboard、RDK X5 上的业务 Agent 与
-SafeExec Runtime、Windows 上的 Guard 与 JOY OF PROGRAMMING 串成一条常驻
-执行链。可信控制面签发结构化 WorkOrder，Agent 只提出候选动作，不能自行
-扩大授权。
+本方案将 RDK X5 上的可信配置页、Dashboard、业务 Agent 与 SafeExec
+Runtime，以及 Windows 上的 Guard 与 JOY OF PROGRAMMING 串成一条常驻执行
+链。Mac 只作为浏览器管理终端。可信控制面签发结构化 WorkOrder，Agent 只
+提出候选动作，不能自行扩大授权。
 
 ## 架构
 
 ```text
-Mac Config :8787/config → Signed WorkOrder
-Mac Dashboard :8787 ─────────────────────┐
-                                        ↓
+Mac Browser → X5 Config / Dashboard :8787
+                         ↓ Signed WorkOrder / control
 RDK X5 Orchestrator :8789 → ActionIntent v2 → RDK X5 Runtime :8790
                                                   ↓ Signed Action Lease
 Windows Guard :8788 → JoyCommand → JOY RPC :18189
 ```
 
-X5 Runtime 持有 Lease 私钥；Windows Guard 只持有对应公钥。Mac 可信控制面
-持有另一组 WorkOrder 私钥，X5 Runtime 只信任其公钥。X5 上
-`safeexec-agent` 与 `safeexec-runtime` 是不同系统账号，前者不能读取 Lease
-私钥。
+X5 Runtime 持有 Lease 私钥；Windows Guard 只持有对应公钥。演示版 X5
+可信控制面账号持有另一组 WorkOrder 私钥，Runtime 只信任其公钥。X5 上
+`safeexec-console`、`safeexec-agent` 与 `safeexec-runtime` 是不同系统账号，
+Agent 不能读取任何签名私钥。生产环境应把 WorkOrder 签名迁移到外部身份
+系统或 KMS。
 
 X5 不扫描 Windows 进程，也不直接连接 JOY RPC。Runtime 只探测
 `/etc/safeexec/runtime.env` 中明确允许的 Guard 服务；Guard 在 Windows 本机
@@ -47,11 +47,11 @@ py -m joy.smoke_test
 Guard 可先于 JOY 场景启动；场景重启后会自动重连。演示期间无需再次启动
 PowerShell，Dashboard 也不会创建 Windows 进程。
 
-## 2. X5：启动 Agent 与 Runtime
+## 2. X5：启动控制台、Agent 与 Runtime
 
-将仓库部署至 `/opt/safeexec`，准备 `.venv`、Lease 私钥、WorkOrder 公钥和
-权限为 `0600` 的 `.run/x5-agent.env`。环境文件只保存 Agent Provider 配置，
-不得提交到 Git。
+将仓库部署至 `/opt/safeexec`，准备 `.venv`、Lease 私钥、WorkOrder
+公私钥和权限为 `0600` 的 `.run/x5-agent.env`。环境文件只保存 Agent
+Provider 配置，不得提交到 Git。
 
 ```bash
 cd /opt/safeexec
@@ -59,13 +59,15 @@ cd /opt/safeexec
 ./scripts/start_x5_edge.sh
 ```
 
-安装脚本创建并启用 `safeexec-runtime.service` 与
-`safeexec-orchestrator.service`。板子重启后两项服务自动恢复，但生产线保持
-停止，不会自动执行上次任务。
+安装脚本创建并启用 `safeexec-dashboard.service`、
+`safeexec-runtime.service` 与 `safeexec-orchestrator.service`。板子重启后三项
+服务自动恢复，但生产线保持停止，不会自动执行上次任务。
 
 默认地址：
 
 - X5 USB：`192.168.128.10`
+- Dashboard：`http://192.168.128.10:8787`
+- 可信配置：`http://192.168.128.10:8787/config`
 - Orchestrator：`http://192.168.128.10:8789`
 - Runtime：`http://192.168.128.10:8790`
 
@@ -78,20 +80,14 @@ SAFEEXEC_GUARD_CANDIDATES=http://WINDOWS_LAN_IP:8788,http://WINDOWS_TAILSCALE_IP
 候选按顺序选择；未通过 `/readyz`、audience 不匹配或 JOY 未响应的服务不会
 成为执行端。`LAB_LEGACY_URL` 仅配置显式不安全的对照桥。
 
-## 3. Mac：启动可信控制面与 Dashboard
+## 3. Mac：打开管理终端
 
-Mac 只保留 WorkOrder 签名私钥，不运行 Agent 或 Runtime：
+Mac 不保存密钥、不运行 SafeExec 服务，只打开浏览器：
 
 ```bash
-SAFEEXEC_X5_HOST=192.168.128.10 \
-SAFEEXEC_WINDOWS_HOST=WINDOWS_IP \
-./scripts/start_edge_dashboard.sh
+open http://192.168.128.10:8787
+open http://192.168.128.10:8787/config
 ```
-
-服务地址：
-
-- Dashboard：`http://127.0.0.1:8787`
-- 可信配置：`http://127.0.0.1:8787/config`
 
 健康检查：
 
@@ -102,7 +98,7 @@ curl http://192.168.128.10:8790/healthz
 ```
 
 `healthz` 仅证明进程存活。`preflight_demo.sh` 检查
-`Mac → X5 Orchestrator → Runtime → Windows Guard → JOY` 全链路。可信工单
+`X5 Console → Orchestrator → Runtime → Windows Guard → JOY` 全链路。可信工单
 尚未激活时，设备组件可以全部为绿色，但“开始”仍保持锁定。
 
 ## 4. V4 演示流程

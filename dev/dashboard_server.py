@@ -138,8 +138,18 @@ class DashboardBackend:
             self._last_physical = physical
             physical_status = "confirmed"
         if not busy:
+            guard_endpoint = (
+                preflight.get("components", {})
+                .get("guard", {})
+                .get("endpoint")
+            )
+            if not isinstance(guard_endpoint, str) or not guard_endpoint:
+                guard_endpoint = self.guard_url
             try:
-                response = json_request(f"{self.guard_url}/v1/physical", timeout=3)
+                response = json_request(
+                    f"{guard_endpoint.rstrip('/')}/v1/physical",
+                    timeout=3,
+                )
                 value = response.get("physical")
                 if isinstance(value, dict):
                     physical = self._merge_physical(physical, value)
